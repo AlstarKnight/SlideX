@@ -62,7 +62,9 @@ class PanelService : Service(), SharedPreferences.OnSharedPreferenceChangeListen
             stopSelf()
             return START_NOT_STICKY
         }
-        if (intent?.action == ACTION_OPEN_PANEL) openPanel(ball?.side ?: prefs.side, intent.getIntExtra(EXTRA_PAGE, 0))
+        if (intent?.action == ACTION_OPEN_PANEL) {
+            openPanel(ball?.side ?: prefs.side, intent.getIntExtra(EXTRA_PAGE, -1).takeIf { it >= 0 })
+        }
         return START_STICKY
     }
 
@@ -118,7 +120,16 @@ class PanelService : Service(), SharedPreferences.OnSharedPreferenceChangeListen
     private fun addTrigger() {
         when (prefs.triggerMode) {
             TriggerMode.EDGE -> addHandle()
-            TriggerMode.BALL -> ball = FloatingBall(this, windowManager, prefs, onGesture = ::onBallGesture).also { it.add() }
+            TriggerMode.BALL -> ball = FloatingBall(
+                this,
+                windowManager,
+                prefs,
+                onTap = ::onBallTap,
+                onPullStart = { side, rawX -> openPanel(side, heldAt = rawX) },
+                onPull = { rawX -> panel?.drag(rawX) },
+                onPullEnd = ::releasePanel,
+                onPick = { item -> launcher.launch(item) },
+            ).also { it.add() }
         }
         updateKeyboard()
         updateTriggerVisibility()
@@ -128,21 +139,31 @@ class PanelService : Service(), SharedPreferences.OnSharedPreferenceChangeListen
         ball?.keyboardTop = ActionAccessibilityService.keyboardTop.value.takeIf { prefs.avoidKeyboard }
     }
 
-    /** Shows the trigger unless the panel is open, the app list rules out the app in front, or it is landscape. */
+    /**
+     * Shows the trigger unless the panel is open, the app list rules out the app in front, or it is landscape. A
+     * landscape forced from the panel keeps it, so the panel can still be opened to undo it.
+     */
     private fun updateTriggerVisibility() {
         val front = ActionAccessibilityService.foregroundPackage.value
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         // The handle stays while a finger drags the panel out from it: hiding it would cancel the touch.
         val visible = panel?.held != false &&
             triggerAllowedIn(front, prefs.appListMode, prefs.listedApps, packageName) &&
-            !(landscape && prefs.hideInLandscape)
+            !(landscape && prefs.hideInLandscape && !launcher.orientationForced)
         handle?.visibility = if (visible) View.VISIBLE else View.GONE
         ball?.visible = visible
     }
 
-    /** A tap or long press on the floating icon: null opens the panel, anything else runs that action. */
-    private fun onBallGesture(action: Action?, side: Side) {
+    /** A tap on the floating icon opens the panel, or runs the action chosen for it. */
+    private fun onBallTap(side: Side) {
+        val action = prefs.ballTapAction
         if (action == null) openPanel(side) else launcher.launch(ActionItem(getString(action.labelRes), action))
+    }
+
+    /** Lets go of a panel pulled out by a finger, moving sideways at [velocityX]. */
+    private fun releasePanel(velocityX: Float) {
+        panel?.release(velocityX)
+        updateTriggerVisibility()
     }
 
     private fun removeTrigger() {
@@ -157,10 +178,7 @@ class PanelService : Service(), SharedPreferences.OnSharedPreferenceChangeListen
             this,
             onOpen = { rawX -> openPanel(prefs.side, heldAt = rawX.takeIf { prefs.followFinger }) },
             onDrag = { rawX -> panel?.drag(rawX) },
-            onRelease = { velocityX ->
-                panel?.release(velocityX)
-                updateTriggerVisibility()
-            },
+            onRelease = ::releasePanel,
             onMove = ::moveHandle,
             onMoveEnd = ::dropHandle,
         )
@@ -220,19 +238,23 @@ class PanelService : Service(), SharedPreferences.OnSharedPreferenceChangeListen
         }
     }
 
-    /** Opens the panel on [page]; with [heldAt] it follows a finger at that screen x instead of sliding out. */
-    private fun openPanel(side: Side, page: Int = 0, heldAt: Float? = null) {
+    /**
+     * Opens the panel on [page], or by default on the page whose scene lists the app in front; with [heldAt] it
+     * follows a finger at that screen x instead of sliding out.
+     */
+    private fun openPanel(side: Side, page: Int? = null, heldAt: Float? = null) {
         if (panel != null || (handle == null && ball == null)) return
+        val store = ConfigStore.get(this)
         panel = PanelWindow(
             context = this,
             windowManager = windowManager,
             side = side,
-            initialPage = page,
+            initialPage = page ?: store.config.value.scenePage(ActionAccessibilityService.foregroundPackage.value),
             widthFraction = prefs.panelWidthPercent / 100f,
             scrimAlpha = prefs.scrimPercent / 100f,
             blurBehind = prefs.panelBlur,
             seeThroughOnBrightness = prefs.brightnessSeeThrough,
-            store = ConfigStore.get(this),
+            store = store,
             launcher = launcher,
             onOpenSettings = {
                 startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

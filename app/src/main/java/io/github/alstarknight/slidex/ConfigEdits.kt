@@ -11,6 +11,14 @@ fun PanelConfig.movePage(index: Int, offset: Int): PanelConfig = copy(pages = pa
 fun PanelConfig.setPageStyle(index: Int, transform: (PageStyle) -> PageStyle): PanelConfig =
     copy(pages = pages.mapIndexed { i, page -> if (i == index) page.copy(style = transform(page.style)) else page })
 
+/** Makes the panel open on the page at [index] in [apps]; an app can open only one page, so other pages drop it. */
+fun PanelConfig.setSceneApps(index: Int, apps: Set<String>): PanelConfig =
+    copy(pages = pages.mapIndexed { i, page -> page.copy(sceneApps = if (i == index) apps else page.sceneApps - apps) })
+
+/** The page the panel opens on while [app] is in front: the one that lists it, or else the first. */
+fun PanelConfig.scenePage(app: String?): Int =
+    pages.indexOfFirst { app != null && app in it.sceneApps }.coerceAtLeast(0)
+
 /** Pictures still used as a page background; any other saved picture can be deleted. */
 fun PanelConfig.backgrounds(): Set<String> = pages.mapNotNullTo(mutableSetOf()) { it.style.background }
 
@@ -35,6 +43,7 @@ fun PanelConfig.renameCard(cardId: String, title: String): PanelConfig = mapCard
         is HitokotoCard -> it.copy(title = title)
         is SystemCard -> it.copy(title = title)
         is UsageCard -> it.copy(title = title)
+        is ScreenTimeCard -> it.copy(title = title)
         is WidgetCard -> it.copy(title = title)
     }
 }
@@ -46,6 +55,7 @@ fun PanelConfig.setShowTitle(cardId: String, show: Boolean): PanelConfig = mapCa
         is HitokotoCard -> it.copy(showTitle = show)
         is SystemCard -> it.copy(showTitle = show)
         is UsageCard -> it.copy(showTitle = show)
+        is ScreenTimeCard -> it.copy(showTitle = show)
         is WidgetCard -> it.copy(showTitle = show)
         is TextCard -> it
     }

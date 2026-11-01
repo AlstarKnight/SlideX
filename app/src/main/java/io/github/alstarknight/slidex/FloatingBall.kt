@@ -9,7 +9,9 @@ import android.graphics.Point
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.os.Build
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
@@ -17,15 +19,28 @@ import androidx.core.content.ContextCompat
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
-/** Floating icon that can be dragged anywhere; a tap or a long press opens the panel or runs an action. */
+/** What a touch on the floating icon became once the finger moved or was held. */
+private enum class BallGesture { MOVE, PULL, MENU }
+
+/**
+ * Floating icon that can be dragged anywhere. A tap runs [onTap]; a sideways swipe into the screen pulls the panel
+ * out ([onPullStart] with the finger's screen x, then [onPull], and [onPullEnd] with its sideways speed); a long press
+ * shows the shortcuts around the icon, and [onPick] runs the one picked.
+ */
 class FloatingBall(
     context: Context,
     private val windowManager: WindowManager,
     private val prefs: Prefs,
-    private val onGesture: (action: Action?, side: Side) -> Unit,
+    private val onTap: (side: Side) -> Unit,
+    private val onPullStart: (side: Side, rawX: Float) -> Unit,
+    private val onPull: (rawX: Float) -> Unit,
+    private val onPullEnd: (velocityX: Float) -> Unit,
+    onPick: (Item) -> Unit,
 ) {
     private val density = context.resources.displayMetrics.density
-    private val view = BallView(context, onDragStart = ::onDragStart, onDrag = ::onDrag, onDrop = ::onDrop)
+    private val view = BallView(context, onMoveStart = ::onMoveStart, onMove = ::onMove, onRelease = ::onRelease)
+    private val menu = BallMenu(context, windowManager, onPick)
+    private var gesture: BallGesture? = null
     private val params = WindowManager.LayoutParams(
         0,
         0,
@@ -42,17 +57,19 @@ class FloatingBall(
     private var dragStartY = 0
 
     init {
-        view.setOnClickListener { onGesture(prefs.ballTapAction, side) }
-        view.setOnLongClickListener {
-            onGesture(prefs.ballLongPressAction, side)
-            true
+        view.setOnClickListener {
+            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            onTap(side)
         }
+        // Handling the long press also gives it the system's long-press vibration.
+        view.setOnLongClickListener { showMenu() }
     }
 
     var visible: Boolean
         get() = view.visibility == View.VISIBLE
         set(value) {
             view.visibility = if (value) View.VISIBLE else View.GONE
+            if (!value) menu.hide()
         }
 
     /** Top edge of the on-screen keyboard, or null when none is shown; the icon moves up out of its way. */
@@ -74,12 +91,13 @@ class FloatingBall(
 
     /** Re-reads size, shape, opacity and position, e.g. after a settings change or a rotation. */
     fun update() {
-        if (view.dragging) return
+        if (gesture == BallGesture.MOVE) return
         applyPrefs()
         windowManager.updateViewLayout(view, params)
     }
 
     fun remove() {
+        menu.hide()
         windowManager.removeView(view)
     }
 
@@ -93,31 +111,71 @@ class FloatingBall(
         params.y = aboveKeyboard(top, size, keyboardTop, (KEYBOARD_GAP_DP * density).roundToInt())
         view.shape = prefs.ballShape
         view.alpha = prefs.ballOpacityPercent / 100f
+        view.isHapticFeedbackEnabled = prefs.ballHaptics
     }
 
-    private fun onDragStart() {
-        dragStartX = params.x
-        dragStartY = params.y
+    /** Shows the shortcuts around the icon; returns false when none is set. */
+    private fun showMenu(): Boolean {
+        val items = prefs.ballMenu
+        if (items.isEmpty()) return false
+        menu.show(items, params.x + params.width / 2f, params.y + params.height / 2f, params.width)
+        gesture = BallGesture.MENU
+        return true
     }
 
-    private fun onDrag(dx: Float, dy: Float) {
-        val screen = windowManager.screenSize()
-        params.x = (dragStartX + dx.roundToInt()).coerceIn(0, (screen.x - params.width).coerceAtLeast(0))
-        params.y = (dragStartY + dy.roundToInt()).coerceIn(0, (screen.y - params.height).coerceAtLeast(0))
-        windowManager.updateViewLayout(view, params)
+    /** The finger left the icon: a sideways swipe into the screen pulls the panel out, anything else moves the icon. */
+    private fun onMoveStart(dx: Float, dy: Float, rawX: Float) {
+        val from = side
+        gesture = if (isOpenSwipe(from, dx, dy, thresholdPx = 0f)) {
+            onPullStart(from, rawX)
+            BallGesture.PULL
+        } else {
+            dragStartX = params.x
+            dragStartY = params.y
+            BallGesture.MOVE
+        }
     }
 
-    /** Remembers where the icon was dropped, relative to the screen size so it survives rotation. */
-    private fun onDrop() {
-        val screen = windowManager.screenSize()
-        prefs.setBallPosition(
-            centerFraction(screen.x, params.width, params.x),
-            centerFraction(screen.y, params.height, params.y),
-        )
+    private fun onMove(dx: Float, dy: Float, rawX: Float) {
+        when (gesture) {
+            BallGesture.MOVE -> {
+                val screen = windowManager.screenSize()
+                params.x = (dragStartX + dx.roundToInt()).coerceIn(0, (screen.x - params.width).coerceAtLeast(0))
+                params.y = (dragStartY + dy.roundToInt()).coerceIn(0, (screen.y - params.height).coerceAtLeast(0))
+                windowManager.updateViewLayout(view, params)
+            }
+            BallGesture.PULL -> onPull(rawX)
+            BallGesture.MENU -> menu.select(menuDirection(dx, dy, MENU_SELECT_DP * density))
+            null -> Unit
+        }
+    }
+
+    private fun onRelease(dx: Float, dy: Float, velocityX: Float) {
+        when (gesture) {
+            // Remember where the icon was dropped, relative to the screen size so it survives rotation.
+            BallGesture.MOVE -> {
+                val screen = windowManager.screenSize()
+                prefs.setBallPosition(
+                    centerFraction(screen.x, params.width, params.x),
+                    centerFraction(screen.y, params.height, params.y),
+                )
+            }
+            BallGesture.PULL -> onPullEnd(velocityX)
+            // Let go on a shortcut runs it; anywhere else the menu stays open for a tap.
+            BallGesture.MENU -> {
+                menu.select(null)
+                menu.pick(menuDirection(dx, dy, MENU_SELECT_DP * density))
+            }
+            null -> Unit
+        }
+        gesture = null
     }
 }
 
 private const val KEYBOARD_GAP_DP = 12
+
+/** How far a finger held on the icon moves toward a shortcut to pick it. */
+private const val MENU_SELECT_DP = 24
 
 /** Size of the whole screen in pixels, system bars included. */
 fun WindowManager.screenSize(): Point =
@@ -128,13 +186,17 @@ fun WindowManager.screenSize(): Point =
         Point().also { defaultDisplay.getRealSize(it) }
     }
 
-/** The app icon clipped to a circle or a rounded square. */
+/**
+ * The app icon clipped to a circle or a rounded square. Once the finger moves past the touch slop it reports
+ * [onMoveStart] and then every [onMove], and [onRelease] with the sideways speed when it lifts; after a long press it
+ * reports moves and the release without [onMoveStart]. A touch that does neither is a click.
+ */
 @SuppressLint("ViewConstructor")
 private class BallView(
     context: Context,
-    private val onDragStart: () -> Unit,
-    private val onDrag: (dx: Float, dy: Float) -> Unit,
-    private val onDrop: () -> Unit,
+    private val onMoveStart: (dx: Float, dy: Float, rawX: Float) -> Unit,
+    private val onMove: (dx: Float, dy: Float, rawX: Float) -> Unit,
+    private val onRelease: (dx: Float, dy: Float, velocityX: Float) -> Unit,
 ) : View(context) {
 
     var shape = BallShape.CIRCLE
@@ -144,19 +206,15 @@ private class BallView(
             invalidate()
         }
 
-    var dragging = false
-        private set
-
     private val icon = ContextCompat.getDrawable(context, R.mipmap.ic_launcher)
     private val clip = Path()
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var downX = 0f
     private var downY = 0f
+    private var moved = false
     private var longPressed = false
-    private val longPress = Runnable {
-        longPressed = true
-        performLongClick()
-    }
+    private var velocityTracker: VelocityTracker? = null
+    private val longPress = Runnable { longPressed = performLongClick() }
 
     init {
         contentDescription = context.getString(R.string.ball_description)
@@ -196,40 +254,44 @@ private class BallView(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            velocityTracker?.recycle()
+            velocityTracker = VelocityTracker.obtain()
+        }
+        velocityTracker?.addMovement(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = event.rawX
                 downY = event.rawY
-                dragging = false
+                moved = false
                 longPressed = false
                 postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
             }
             MotionEvent.ACTION_MOVE -> {
                 val dx = event.rawX - downX
                 val dy = event.rawY - downY
-                if (!dragging && !longPressed && hypot(dx, dy) > touchSlop) {
+                if (!moved && !longPressed && hypot(dx, dy) > touchSlop) {
                     removeCallbacks(longPress)
-                    dragging = true
-                    onDragStart()
+                    moved = true
+                    onMoveStart(dx, dy, event.rawX)
                 }
-                if (dragging) onDrag(dx, dy)
+                if (moved || longPressed) onMove(dx, dy, event.rawX)
             }
-            MotionEvent.ACTION_UP -> {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPress)
+                val tracker = velocityTracker
+                velocityTracker = null
+                val up = event.actionMasked == MotionEvent.ACTION_UP
                 when {
-                    dragging -> {
-                        dragging = false
-                        onDrop()
+                    // A cancelled touch picks nothing and lets the panel settle where it is.
+                    (moved || longPressed) && !up -> onRelease(0f, 0f, 0f)
+                    moved || longPressed -> {
+                        tracker?.computeCurrentVelocity(1000)
+                        onRelease(event.rawX - downX, event.rawY - downY, tracker?.xVelocity ?: 0f)
                     }
-                    !longPressed -> performClick()
+                    up -> performClick()
                 }
-            }
-            MotionEvent.ACTION_CANCEL -> {
-                removeCallbacks(longPress)
-                if (dragging) {
-                    dragging = false
-                    onDrop()
-                }
+                tracker?.recycle()
             }
         }
         return true

@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -203,7 +204,7 @@ fun PageStyleEditor(pageIndex: Int, style: PageStyle, store: ConfigStore, onPick
                     OutlinedButton(
                         onClick = {
                             update { it.copy(background = null) }
-                            BackgroundImages.deleteUnused(context, store.config.value)
+                            store.deleteUnused()
                         },
                         modifier = Modifier.weight(1f),
                     ) {
@@ -236,6 +237,45 @@ fun PageStyleEditor(pageIndex: Int, style: PageStyle, store: ConfigStore, onPick
                 TRANSPARENCY_RANGE,
             ) { value -> update { it.copy(cardTransparency = value) } }
             Hint(stringResource(R.string.transparency_hint))
+        }
+    }
+}
+
+/**
+ * The apps in which the panel opens on this page, like the original app's scenes (情景模式); [onPick] shows the app
+ * list. Knowing the app in front needs the accessibility service.
+ */
+@Composable
+fun SceneEditor(apps: Set<String>, onPick: () -> Unit) {
+    val context = LocalContext.current
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(R.string.scene_title), style = MaterialTheme.typography.titleMedium)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onPick)
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(stringResource(R.string.scene_apps), Modifier.weight(1f))
+                Text(
+                    if (apps.isEmpty()) {
+                        stringResource(R.string.listed_apps_none)
+                    } else {
+                        stringResource(R.string.listed_apps_count, apps.size)
+                    },
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Hint(stringResource(R.string.scene_hint))
+            if (!ActionAccessibilityService.isEnabled(context)) Hint(stringResource(R.string.needs_accessibility_hint))
         }
     }
 }

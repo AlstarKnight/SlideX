@@ -183,7 +183,7 @@ private class PanelRootView(context: Context, private val onBack: () -> Unit) : 
 }
 
 /** Lifecycle, saved-state and back-dispatcher owner that Compose needs when it runs outside an activity. */
-private class OverlayLifecycleOwner : SavedStateRegistryOwner, OnBackPressedDispatcherOwner {
+class OverlayLifecycleOwner : SavedStateRegistryOwner, OnBackPressedDispatcherOwner {
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateController = SavedStateRegistryController.create(this)
 

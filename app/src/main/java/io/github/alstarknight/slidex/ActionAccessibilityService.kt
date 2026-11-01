@@ -10,13 +10,19 @@ import android.graphics.Rect
 import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /**
  * Performs system actions (lock screen, screenshot, notifications…) for shortcut items, tracks which app is in
- * front so the trigger can follow the app list, and where the keyboard is so the floating icon can move out of its
- * way. It looks only at window types and positions, never at what windows show.
+ * front so the trigger can follow the app list and the panel can open on that app's page, and where the keyboard is
+ * so the floating icon can move out of its way. It looks only at window types and positions, never at what windows
+ * show.
  */
 class ActionAccessibilityService : AccessibilityService(), SharedPreferences.OnSharedPreferenceChangeListener {
 
@@ -27,14 +33,28 @@ class ActionAccessibilityService : AccessibilityService(), SharedPreferences.OnS
     private var trackForeground = false
     private var trackKeyboard = false
 
+    /** Whether a page opens in some apps, which lives in the panel config rather than the preferences. */
+    private var hasScenes = false
+    private var scenesWatch: Job? = null
+
     override fun onServiceConnected() {
         instance = this
         prefs.prefs.registerOnSharedPreferenceChangeListener(this)
         updateTracking()
+        scenesWatch = MainScope().launch {
+            ConfigStore.get(this@ActionAccessibilityService).config
+                .map { config -> config.pages.any { it.sceneApps.isNotEmpty() } }
+                .distinctUntilChanged()
+                .collect {
+                    hasScenes = it
+                    updateTracking()
+                }
+        }
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         instance = null
+        scenesWatch?.cancel()
         prefs.prefs.unregisterOnSharedPreferenceChangeListener(this)
         foreground.value = null
         keyboard.value = null
@@ -44,12 +64,12 @@ class ActionAccessibilityService : AccessibilityService(), SharedPreferences.OnS
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) = updateTracking()
 
     /**
-     * Asks for window events only while a setting uses them: the app list needs the app in front, the floating
-     * icon's keyboard dodging needs the keyboard. Otherwise the system sends it no events at all.
+     * Asks for window events only while a setting uses them: the app list and scenes need the app in front, the
+     * floating icon's keyboard dodging needs the keyboard. Otherwise the system sends it no events at all.
      */
     private fun updateTracking() {
         trackForeground = prefs.serviceEnabled &&
-            (prefs.appListMode == AppListMode.WHITELIST || prefs.listedApps.isNotEmpty())
+            (prefs.appListMode == AppListMode.WHITELIST || prefs.listedApps.isNotEmpty() || hasScenes)
         trackKeyboard = prefs.serviceEnabled && prefs.triggerMode == TriggerMode.BALL && prefs.avoidKeyboard
         if (!trackForeground) foreground.value = null
         if (!trackKeyboard) keyboard.value = null

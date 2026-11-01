@@ -29,9 +29,9 @@ object WidgetHost {
             host ?: AppWidgetHost(context.applicationContext, HOST_ID).also { host = it }
         }
 
-    /** Frees widget ids no card uses any more, e.g. after deleting a card or a page, or importing a config. */
-    fun deleteUnused(context: Context, config: PanelConfig) {
-        val used = config.widgetIds()
+    /** Frees widget ids no card in [configs] uses any more, e.g. after deleting a card, a page or a config. */
+    fun deleteUnused(context: Context, configs: List<PanelConfig>) {
+        val used = configs.flatMap { it.widgetIds() }.toSet()
         val host = get(context)
         host.appWidgetIds.filterNot { it in used }.forEach(host::deleteAppWidgetId)
     }

@@ -54,11 +54,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Full-panel sheet for picking what to add to a grid card: apps, shortcut actions, ready-made links and links of
- * your own. Several can be ticked, across tabs, and added together.
+ * Full-panel sheet for picking what to add to a grid card: apps, shortcut actions but [excludedActions], ready-made
+ * links and links of your own. Several can be ticked, across tabs, and added together.
  */
 @Composable
-fun AddItemSheet(onAdd: (List<Item>) -> Unit, onDismiss: () -> Unit) {
+fun AddItemSheet(onAdd: (List<Item>) -> Unit, onDismiss: () -> Unit, excludedActions: Set<Action> = emptySet()) {
     BackHandler(onBack = onDismiss)
     var tab by remember { mutableIntStateOf(0) }
     val selected = remember { mutableStateListOf<Item>() }
@@ -85,7 +85,7 @@ fun AddItemSheet(onAdd: (List<Item>) -> Unit, onDismiss: () -> Unit) {
             }
             when (tab) {
                 0 -> AppPicker(selected, toggle)
-                1 -> ActionPicker(selected, toggle)
+                1 -> ActionPicker(selected, toggle, excludedActions)
                 else -> LinkPicker(selected, toggle, onAdd = { link -> onAdd(selected + link) })
             }
         }
@@ -124,9 +124,9 @@ private fun AppPicker(selected: List<Item>, onToggle: (Item) -> Unit) {
 }
 
 @Composable
-private fun ActionPicker(selected: List<Item>, onToggle: (Item) -> Unit) {
+private fun ActionPicker(selected: List<Item>, onToggle: (Item) -> Unit, excluded: Set<Action>) {
     val context = LocalContext.current
-    val (switches, shortcuts) = Action.entries.partition { it in SWITCH_ACTIONS }
+    val (switches, shortcuts) = (Action.entries - excluded).partition { it in SWITCH_ACTIONS }
     LazyColumn {
         listOf(R.string.action_group_shortcuts to shortcuts, R.string.action_group_switches to switches).forEach { (title, actions) ->
             item(key = title) { GroupTitle(stringResource(title)) }

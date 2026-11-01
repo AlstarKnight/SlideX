@@ -2,6 +2,7 @@ package io.github.alstarknight.slidex
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -92,5 +93,22 @@ class EdgeGeometryTest {
         assertEquals(500, aboveKeyboard(top = 500, size = 100, keyboardTop = 1500, gap = 20))
         assertEquals(1380, aboveKeyboard(top = 1600, size = 100, keyboardTop = 1500, gap = 20))
         assertEquals(0, aboveKeyboard(top = 100, size = 100, keyboardTop = 50, gap = 20))
+    }
+
+    @Test
+    fun menuPicksTheWayTheFingerMovedMost() {
+        assertNull(menuDirection(dx = 10f, dy = -10f, thresholdPx = 30f))
+        assertEquals(Direction.UP, menuDirection(dx = 10f, dy = -40f, thresholdPx = 30f))
+        assertEquals(Direction.DOWN, menuDirection(dx = -10f, dy = 40f, thresholdPx = 30f))
+        assertEquals(Direction.LEFT, menuDirection(dx = -40f, dy = 20f, thresholdPx = 30f))
+        assertEquals(Direction.RIGHT, menuDirection(dx = 40f, dy = 40f, thresholdPx = 30f))
+    }
+
+    @Test
+    fun menuStaysOnScreenNextToAnEdge() {
+        assertEquals(500f, menuCenter(position = 500f, reach = 200f, length = 1000f), 0f)
+        assertEquals(800f, menuCenter(position = 980f, reach = 200f, length = 1000f), 0f)
+        assertEquals(200f, menuCenter(position = 0f, reach = 200f, length = 1000f), 0f)
+        assertEquals(150f, menuCenter(position = 20f, reach = 200f, length = 300f), 0f)
     }
 }

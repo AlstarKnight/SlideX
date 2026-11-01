@@ -29,9 +29,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.toColorInt
+import kotlinx.serialization.Serializable
 
 @get:StringRes
 val ThemePreset.labelRes: Int
@@ -42,7 +45,7 @@ val ThemePreset.labelRes: Int
         ThemePreset.CLASSIC -> R.string.theme_classic
     }
 
-private val ThemePreset.cardRadius: Dp
+val ThemePreset.cardRadius: Dp
     get() = when (this) {
         ThemePreset.STARRY -> 22.dp
         ThemePreset.MATERIAL -> 24.dp
@@ -66,21 +69,62 @@ val LocalThemeExtras = staticCompositionLocalOf {
     ThemeExtras(dark = false, preset = ThemePreset.STARRY, titleBrush = null, stars = false, cardBorder = null)
 }
 
+/**
+ * Fine-tuning of the panel's look on top of the theme, set in the settings. Colors are `#RRGGBB`; null follows the
+ * theme.
+ */
+@Serializable
+@Immutable
+data class Appearance(
+    /** Corner radius of the cards in dp, or null for the theme's. */
+    val cardRadiusDp: Int? = null,
+    /** Space between cards in dp. */
+    val cardGapDp: Int = 12,
+    /** Space between the panel's edges and the cards in dp. */
+    val panelPaddingDp: Int = 12,
+    /** Space between a card's edges and its content in dp, across; up and down it is two thirds of that. */
+    val cardPaddingDp: Int = 12,
+    /** Size of the names under icons in sp. */
+    val labelSizeSp: Int = 12,
+    /** Color of pages without a picture. */
+    val backgroundColor: String? = null,
+    val switchOnColor: String? = null,
+    val switchOffColor: String? = null,
+)
+
+val CARD_RADIUS_RANGE = 0..32
+val CARD_GAP_RANGE = 0..32
+val PANEL_PADDING_RANGE = 0..32
+val CARD_PADDING_RANGE = 4..24
+val LABEL_SIZE_RANGE = 9..16
+
+val LocalAppearance = staticCompositionLocalOf { Appearance() }
+
+/** A color from [Appearance]. */
+fun appearanceColor(hex: String): Color = Color(hex.toColorInt())
+
+/** Dark or white text, whichever reads better on [background]. */
+fun contentColorOn(background: Color): Color = if (background.luminance() > 0.5f) Color(0xFF1D1B20) else Color.White
+
 @Composable
 fun AppTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { Prefs(context) }
     var preset by remember { mutableStateOf(prefs.themePreset) }
     var mode by remember { mutableStateOf(prefs.darkMode) }
+    var appearance by remember { mutableStateOf(prefs.appearance) }
     DisposableEffect(prefs) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
             preset = prefs.themePreset
             mode = prefs.darkMode
+            appearance = prefs.appearance
         }
         prefs.prefs.registerOnSharedPreferenceChangeListener(listener)
         onDispose { prefs.prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
-    PresetTheme(preset, mode.isDark(), content)
+    CompositionLocalProvider(LocalAppearance provides appearance) {
+        PresetTheme(preset, mode.isDark(), content)
+    }
 }
 
 /** The Material theme and extras of one preset; pages with a look of their own use it too. */
@@ -95,19 +139,23 @@ fun PresetTheme(preset: ThemePreset, dark: Boolean, content: @Composable () -> U
         stars = preset == ThemePreset.STARRY && dark,
         cardBorder = if (preset == ThemePreset.PAPER) BorderStroke(1.dp, colors.outlineVariant) else null,
     )
-    MaterialTheme(colorScheme = colors, shapes = Shapes(medium = RoundedCornerShape(preset.cardRadius))) {
+    val cardRadius = LocalAppearance.current.cardRadiusDp?.dp ?: preset.cardRadius
+    MaterialTheme(colorScheme = colors, shapes = Shapes(medium = RoundedCornerShape(cardRadius))) {
         CompositionLocalProvider(LocalThemeExtras provides extras, content = content)
     }
 }
 
 /**
  * A page's own look over [base], the look chosen in the settings. Text and icons outside a card take the page's
- * text color, since the page may be dark while the settings are light or the other way round.
+ * text color, since the page may be dark while the settings are light or the other way round, or one that reads on
+ * the background color set in the settings.
  */
 @Composable
 fun PageTheme(style: PageStyle, base: ThemeExtras, content: @Composable () -> Unit) {
+    val background = LocalAppearance.current.backgroundColor?.takeIf { style.background == null }
     PresetTheme(style.preset ?: base.preset, style.darkMode?.isDark() ?: base.dark) {
-        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface, content = content)
+        val text = background?.let { contentColorOn(appearanceColor(it)) } ?: MaterialTheme.colorScheme.onSurface
+        CompositionLocalProvider(LocalContentColor provides text, content = content)
     }
 }
 

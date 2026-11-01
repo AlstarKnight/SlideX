@@ -32,7 +32,7 @@ class BackgroundPickerActivity : ComponentActivity() {
             } else {
                 val store = ConfigStore.get(context)
                 store.update { it.setPageStyle(pageIndex) { style -> style.copy(background = picture) } }
-                BackgroundImages.deleteUnused(context, store.config.value)
+                store.deleteUnused()
             }
             reopenPanel()
         }

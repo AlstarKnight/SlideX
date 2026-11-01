@@ -16,10 +16,13 @@
     <string name="page_theme">主题外观</string>
     <string name="page_theme_summary">主题、深浅色、图标包、面板宽度、模糊和遮罩</string>
     <string name="page_style">页面外观</string>
+    <string name="scene_title">情景模式</string>
+    <string name="scene_apps">在这些应用里先显示本页</string>
+    <string name="scene_hint">在选中的应用里打开面板时，直接显示这一页，而不是第一页。一个应用只对应一页。</string>
     <string name="page_advanced">高级设置</string>
     <string name="page_advanced_summary">黑名单/白名单、横屏隐藏、磁贴和桌面快捷方式、通知</string>
     <string name="page_config">配置管理</string>
-    <string name="page_config_summary">导出、导入所有页面和卡片</string>
+    <string name="page_config_summary">多套配置切换，导出、导入</string>
     <string name="page_about">关于</string>
     <string name="page_about_summary">版本、项目主页</string>
     <string name="setting_show_notification">显示常驻通知</string>
@@ -32,15 +35,20 @@
     <string name="permission_battery">忽略电池优化</string>
     <string name="permission_battery_desc">尽量避免后台被系统关闭</string>
     <string name="permission_accessibility">无障碍服务</string>
-    <string name="permission_accessibility_desc">锁屏、截屏、通知栏、最近任务、分屏、电源菜单等快捷方式，黑名单/白名单，以及悬浮图标避开键盘需要。开不了的话，先到系统的应用信息页，在右上角菜单里选「允许受限设置」</string>
+    <string name="permission_accessibility_desc">锁屏、截屏、通知栏、最近任务、分屏、电源菜单等快捷方式，黑名单/白名单、情景模式，以及悬浮图标避开键盘需要。开不了的话，先到系统的应用信息页，在右上角菜单里选「允许受限设置」</string>
     <string name="permission_write_settings">修改系统设置</string>
     <string name="permission_write_settings_desc">自动旋转、自动亮度开关和亮度条需要</string>
     <string name="permission_dnd">勿扰权限</string>
     <string name="permission_dnd_desc">静音开关需要</string>
     <string name="permission_usage">使用情况访问</string>
-    <string name="permission_usage_desc">「最近使用」「常用应用」卡片需要，只读取各应用的使用时间</string>
+    <string name="permission_usage_desc">「最近使用」「常用应用」「使用时长」卡片需要，只读取各应用的使用时间</string>
     <string name="permission_granted">已开启</string>
     <string name="permission_grant">去开启</string>
+    <string name="permission_shizuku">Shizuku（可选）</string>
+    <string name="permission_shizuku_desc">装好并启动 Shizuku 后，WLAN、蓝牙、移动数据、定位、NFC 和飞行模式开关会直接切换，不再跳到系统设置</string>
+    <string name="shizuku_not_installed">还没安装 Shizuku，点「去开启」打开它的网站下载</string>
+    <string name="shizuku_not_running">Shizuku 没有在运行，点「去开启」打开它并启动</string>
+    <string name="shizuku_no_permission">点「去开启」允许 SlideX 使用 Shizuku</string>
 
     <string name="section_trigger_mode">触发</string>
     <string name="section_position">位置</string>
@@ -68,7 +76,17 @@
     <string name="setting_ball_size">大小</string>
     <string name="setting_ball_opacity">不透明度</string>
     <string name="setting_ball_tap">点击图标</string>
-    <string name="setting_ball_long_press">长按图标</string>
+    <string name="ball_pull_hint">从图标往屏幕中间横着滑，面板会跟着手指拉出来。想把图标横着挪，先往上或往下拖一点再移。</string>
+    <string name="setting_ball_haptics">点击和长按时振动</string>
+    <string name="ball_haptics_hint">跟随系统的触感反馈：系统设置里关闭了触感反馈时不会振动。</string>
+    <string name="section_ball_menu">长按快捷项</string>
+    <string name="ball_menu_hint">长按图标，四周会出现下面四个快捷项。按住不放滑向其中一个再松手就会执行；松手后也可以再点，点空白处关闭。可以选快捷操作、应用或链接（比如微信、支付宝的扫一扫）。</string>
+    <string name="ball_menu_empty">未设置</string>
+    <string name="ball_menu_clear">清除</string>
+    <string name="direction_up">上</string>
+    <string name="direction_down">下</string>
+    <string name="direction_left">左</string>
+    <string name="direction_right">右</string>
     <string name="ball_action_panel">打开面板</string>
     <string name="ball_hint">拖动图标可以放到屏幕任意位置，面板从离图标较近的一侧滑出。</string>
     <string name="handle_drag_hint">长按触发条约半秒，等它变亮后拖动，可以改变上下位置，拖过屏幕中线会换到另一侧。</string>
@@ -111,6 +129,19 @@
     <string name="panel_blur_hint">打开面板时把后面的界面模糊。部分手机在省电模式下或系统关闭了模糊效果时不生效。</string>
     <string name="setting_scrim">背景遮罩</string>
     <string name="scrim_hint">打开面板时把后面的界面调暗多少，调到 0 就不调暗。下次打开面板时生效。</string>
+
+    <string name="section_details">卡片和图标</string>
+    <string name="setting_card_radius">卡片圆角</string>
+    <string name="setting_card_gap">卡片间距</string>
+    <string name="setting_panel_padding">面板边距</string>
+    <string name="setting_card_padding">卡片内边距</string>
+    <string name="setting_label_size">图标名称字号</string>
+    <string name="setting_background_color">面板背景色</string>
+    <string name="background_color_hint">用在没有背景图片的页面上；直接显示在页面上的文字会自动换成深色或白色。</string>
+    <string name="setting_switch_on_color">开关打开时的颜色</string>
+    <string name="setting_switch_off_color">开关关闭时的颜色</string>
+    <string name="color_follow_theme">跟随主题</string>
+    <string name="appearance_reset">全部恢复默认</string>
 
     <string name="page_own_theme">本页单独设置主题</string>
     <string name="page_own_theme_hint">关闭时跟随「主题外观」里的主题和深浅色；深浅色选「默认」时也跟随那里。</string>
@@ -156,6 +187,7 @@
     <string name="default_card_text">文字</string>
     <string name="default_card_hitokoto">一言</string>
     <string name="default_card_switches">开关</string>
+    <string name="default_card_screen_time">今日使用</string>
     <string name="new_grid_card_title">新卡片</string>
 
     <string name="card_drag">按住拖动排序</string>
@@ -188,6 +220,7 @@
     <string name="page_add_recent_card">添加最近使用</string>
     <string name="page_add_frequent_card">添加常用应用</string>
     <string name="page_add_widget_card">添加小部件</string>
+    <string name="page_add_screen_time_card">添加使用时长</string>
     <string name="page_add">新建一页</string>
     <string name="page_delete">删除该页</string>
     <string name="page_move_left">向左移动</string>
@@ -241,6 +274,8 @@
     <string name="action_nfc">NFC</string>
     <string name="action_airplane_mode">飞行模式</string>
     <string name="action_auto_rotate">自动旋转</string>
+    <string name="action_force_landscape">强制横屏</string>
+    <string name="action_force_portrait">强制竖屏</string>
     <string name="action_auto_brightness">自动亮度</string>
     <string name="action_keep_screen_on">屏幕常亮</string>
     <string name="action_eye_care">全局护眼</string>
@@ -255,6 +290,7 @@
     <string name="action_needs_accessibility">请先开启 SlideX 的无障碍服务</string>
     <string name="action_needs_android_9">仅支持 Android 9 及以上的系统</string>
     <string name="action_failed">操作失败</string>
+    <string name="shizuku_failed">Shizuku 没能切换，请到系统设置里切换</string>
     <string name="needs_write_settings">需要「修改系统设置」权限</string>
     <string name="needs_dnd_access">静音需要「勿扰」权限，请允许 SlideX</string>
 
@@ -284,6 +320,11 @@
     <string name="usage_frequent">常用应用</string>
     <string name="usage_empty">最近一周还没有使用记录</string>
     <string name="needs_usage_access">需要「使用情况访问」权限</string>
+    <string name="screen_time_total">今天共用了 %s</string>
+    <string name="screen_time_empty">今天还没有使用记录</string>
+    <string name="duration_under_minute">不到 1 分钟</string>
+    <string name="duration_minutes">%d 分钟</string>
+    <string name="duration_hours_minutes">%1$d 小时 %2$d 分钟</string>
     <string name="widget_picker_title">选择小部件</string>
     <string name="widget_none">没有可以添加的小部件</string>
     <string name="widget_option_details">%1$s · %2$d×%3$d</string>
@@ -294,15 +335,26 @@
     <string name="accessibility_label">SlideX 快捷操作</string>
     <string name="accessibility_description">用于执行快捷方式卡片里的锁屏、截屏、打开通知栏、最近任务、分屏等系统操作；识别当前在前台的应用，以便按黑名单或白名单显示触发条；以及识别输入法窗口的位置，让悬浮图标避开键盘。只查看窗口的类型和位置，不读取屏幕上的文字和内容。</string>
 
-    <string name="config_hint">配置包含所有页面和卡片，导出为 JSON 文件后，换机或重装时可以导入。设置项和背景图片不在其中。</string>
+    <string name="config_hint">把当前配置导出为 zip 文件，背景图片一起打包，换机或重装时再导入。导入的配置作为新的一套加入，不会覆盖现有的。设置项不在其中；换了手机后，小部件需要重新添加。</string>
     <string name="about_version">%1$s %2$s</string>
     <string name="about_project">项目主页</string>
-    <string name="about_credits">功能和交互参考已停更的「全局负一屏」，边缘触发参考 Smart Edge（MIT），图标来自 Material Symbols（Apache 2.0）。</string>
+    <string name="about_credits">功能和交互参考已停更的「全局负一屏」，边缘触发参考 Smart Edge（MIT），图标来自 Material Symbols（Apache 2.0），系统开关借助 Shizuku（MIT）。</string>
     <string name="config_export">导出配置</string>
     <string name="config_import">导入配置</string>
     <string name="config_exported">配置已导出</string>
-    <string name="config_imported">配置已导入</string>
-    <string name="config_import_confirm">导入会替换当前所有页面和卡片，确定继续吗？</string>
+    <string name="config_imported">已导入并切换到这套配置</string>
+    <string name="section_configs">配置列表</string>
+    <string name="configs_hint">每套配置有自己的页面、卡片和情景模式，点一下就切换。主题外观等设置所有配置共用。</string>
+    <string name="section_config_files">导出和导入</string>
+    <string name="config_new">新建配置</string>
+    <string name="config_new_name">配置 %d</string>
+    <string name="config_copy">复制当前配置</string>
+    <string name="config_copy_name">%s 副本</string>
+    <string name="config_rename">重命名</string>
+    <string name="config_delete">删除</string>
+    <string name="config_delete_confirm">删除配置「%s」？它的页面和卡片会一起删除。</string>
+    <string name="config_default_name">默认配置</string>
+    <string name="config_imported_name">导入的配置</string>
     <string name="config_invalid">不是有效的配置文件</string>
     <string name="config_io_failed">读写文件失败</string>
 

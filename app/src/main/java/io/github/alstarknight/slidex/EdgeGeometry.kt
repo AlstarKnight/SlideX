@@ -1,6 +1,7 @@
 package io.github.alstarknight.slidex
 
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 enum class Side { LEFT, RIGHT }
@@ -56,3 +57,20 @@ fun centerFraction(length: Int, size: Int, offset: Int): Float =
  */
 fun aboveKeyboard(top: Int, size: Int, keyboardTop: Int?, gap: Int): Int =
     if (keyboardTop == null || top + size + gap <= keyboardTop) top else (keyboardTop - size - gap).coerceAtLeast(0)
+
+/**
+ * Which of the floating icon's shortcuts a finger that moved [dx], [dy] since its long press points at: the way it
+ * moved most, once it moved at least [thresholdPx]; null before that.
+ */
+fun menuDirection(dx: Float, dy: Float, thresholdPx: Float): Direction? = when {
+    hypot(dx, dy) < thresholdPx -> null
+    abs(dx) >= abs(dy) -> if (dx < 0) Direction.LEFT else Direction.RIGHT
+    else -> if (dy < 0) Direction.UP else Direction.DOWN
+}
+
+/**
+ * Where along a [length] the center of the floating icon's menu goes: on the icon at [position], moved inward as
+ * needed so the shortcuts, which reach [reach] from the center, stay inside.
+ */
+fun menuCenter(position: Float, reach: Float, length: Float): Float =
+    if (length < 2 * reach) length / 2 else position.coerceIn(reach, length - reach)

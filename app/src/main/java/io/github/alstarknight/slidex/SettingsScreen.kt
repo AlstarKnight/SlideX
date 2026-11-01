@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -19,6 +20,7 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +41,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -59,8 +64,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -77,6 +84,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -108,6 +116,8 @@ private data class Permissions(
     val dnd: Boolean,
     val usage: Boolean,
     val battery: Boolean,
+    /** Optional, so it is not counted as missing. */
+    val shizuku: ShizukuShell.State,
 ) {
     val missing: Int
         get() = listOf(overlay, notifications, accessibility, writeSettings, dnd, usage, battery).count { !it }
@@ -121,6 +131,7 @@ private fun readPermissions(context: Context) = Permissions(
     dnd = context.getSystemService(NotificationManager::class.java).isNotificationPolicyAccessGranted,
     usage = UsageApps.hasAccess(context),
     battery = context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName),
+    shizuku = ShizukuShell.state(context),
 )
 
 @Composable
@@ -326,6 +337,28 @@ private fun PermissionSettings(permissions: Permissions, onChanged: () -> Unit) 
             description = stringResource(R.string.permission_battery_desc),
             granted = permissions.battery,
         ) { context.startActivity(batteryOptimizationIntent(context)) }
+        val shizukuStatus = when (permissions.shizuku) {
+            ShizukuShell.State.NOT_INSTALLED -> R.string.shizuku_not_installed
+            ShizukuShell.State.NOT_RUNNING -> R.string.shizuku_not_running
+            ShizukuShell.State.NO_PERMISSION -> R.string.shizuku_no_permission
+            ShizukuShell.State.READY -> null
+        }
+        PermissionRow(
+            title = stringResource(R.string.permission_shizuku),
+            description = stringResource(R.string.permission_shizuku_desc) +
+                shizukuStatus?.let { "\n" + stringResource(it) }.orEmpty(),
+            granted = permissions.shizuku == ShizukuShell.State.READY,
+        ) {
+            when (permissions.shizuku) {
+                ShizukuShell.State.NO_PERMISSION -> ShizukuShell.requestPermission(context)
+                ShizukuShell.State.NOT_RUNNING -> if (!ShizukuShell.openManager(context)) onChanged()
+                else -> try {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, SHIZUKU_SITE.toUri()))
+                } catch (e: ActivityNotFoundException) {
+                    toast(context, R.string.launch_failed)
+                }
+            }
+        }
     }
 }
 
@@ -413,12 +446,16 @@ private fun FloatingBallSettings(prefs: Prefs, accessibilityEnabled: Boolean) {
             tapAction = it
             prefs.ballTapAction = it
         }
-        var longPressAction by remember { mutableStateOf(prefs.ballLongPressAction) }
-        ActionChoice(stringResource(R.string.setting_ball_long_press), longPressAction) {
-            longPressAction = it
-            prefs.ballLongPressAction = it
+        Hint(stringResource(R.string.ball_pull_hint))
+        var haptics by remember { mutableStateOf(prefs.ballHaptics) }
+        SwitchRow(stringResource(R.string.setting_ball_haptics), haptics) {
+            haptics = it
+            prefs.ballHaptics = it
         }
+        Hint(stringResource(R.string.ball_haptics_hint))
     }
+    SectionTitle(stringResource(R.string.section_ball_menu))
+    Section { BallMenuSettings(prefs) }
     SectionTitle(stringResource(R.string.section_keyboard))
     Section {
         var avoidKeyboard by remember { mutableStateOf(prefs.avoidKeyboard) }
@@ -477,7 +514,103 @@ private fun ThemeSettings(prefs: Prefs) {
         SliderRow(stringResource(R.string.setting_scrim), "%", prefs.scrimPercent, 0..80) { prefs.scrimPercent = it }
         Hint(stringResource(R.string.scrim_hint))
     }
+    SectionTitle(stringResource(R.string.section_details))
+    Section { AppearanceSettings(prefs) }
 }
+
+/** Sizes and colors of cards and icons on top of the theme, with a button that puts them all back. */
+@Composable
+private fun AppearanceSettings(prefs: Prefs) {
+    var resets by remember { mutableIntStateOf(0) }
+    fun change(transform: (Appearance) -> Appearance) {
+        prefs.appearance = transform(prefs.appearance)
+    }
+    // A reset starts the controls over from the defaults.
+    key(resets) {
+        val start = remember { prefs.appearance }
+        val radius = start.cardRadiusDp ?: prefs.themePreset.cardRadius.value.roundToInt()
+        SliderRow(stringResource(R.string.setting_card_radius), "dp", radius, CARD_RADIUS_RANGE) { value ->
+            change { it.copy(cardRadiusDp = value) }
+        }
+        SliderRow(stringResource(R.string.setting_card_gap), "dp", start.cardGapDp, CARD_GAP_RANGE) { value ->
+            change { it.copy(cardGapDp = value) }
+        }
+        SliderRow(stringResource(R.string.setting_panel_padding), "dp", start.panelPaddingDp, PANEL_PADDING_RANGE) { value ->
+            change { it.copy(panelPaddingDp = value) }
+        }
+        SliderRow(stringResource(R.string.setting_card_padding), "dp", start.cardPaddingDp, CARD_PADDING_RANGE) { value ->
+            change { it.copy(cardPaddingDp = value) }
+        }
+        SliderRow(stringResource(R.string.setting_label_size), "sp", start.labelSizeSp, LABEL_SIZE_RANGE) { value ->
+            change { it.copy(labelSizeSp = value) }
+        }
+        ColorChoice(stringResource(R.string.setting_background_color), start.backgroundColor) { color ->
+            change { it.copy(backgroundColor = color) }
+        }
+        Hint(stringResource(R.string.background_color_hint))
+        ColorChoice(stringResource(R.string.setting_switch_on_color), start.switchOnColor) { color ->
+            change { it.copy(switchOnColor = color) }
+        }
+        ColorChoice(stringResource(R.string.setting_switch_off_color), start.switchOffColor) { color ->
+            change { it.copy(switchOffColor = color) }
+        }
+    }
+    OutlinedButton(
+        onClick = {
+            prefs.appearance = Appearance()
+            resets++
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(stringResource(R.string.appearance_reset))
+    }
+}
+
+/** A title over one swatch per color to pick, after a chip that follows the theme; it keeps its own selection. */
+@Composable
+private fun ColorChoice(title: String, initial: String?, onSelect: (String?) -> Unit) {
+    var selected by remember { mutableStateOf(initial) }
+    fun select(color: String?) {
+        selected = color
+        onSelect(color)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title)
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilterChip(
+                selected = selected == null,
+                onClick = { select(null) },
+                label = { Text(stringResource(R.string.color_follow_theme)) },
+            )
+            SWATCHES.forEach { color ->
+                val chosen = color == selected
+                Box(
+                    Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(appearanceColor(color))
+                        .border(
+                            if (chosen) 3.dp else 1.dp,
+                            if (chosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                            CircleShape,
+                        )
+                        .clickable { select(color) },
+                )
+            }
+        }
+    }
+}
+
+/** Colors offered for the panel's background and switches: light and dark neutrals, soft tints and strong colors. */
+private val SWATCHES = listOf(
+    "#FFFFFF", "#F2F2F7", "#FFF8E7", "#E8F0FE", "#E6F4EA", "#FCE8F0",
+    "#1C1C1E", "#000000", "#0E1024", "#1F2A44",
+    "#3E63DD", "#5B47D6", "#34A853", "#F29900", "#E8453C", "#00A3BF",
+)
 
 @Composable
 private fun AdvancedSettings(prefs: Prefs, accessibilityEnabled: Boolean) {
@@ -524,43 +657,143 @@ private fun AdvancedSettings(prefs: Prefs, accessibilityEnabled: Boolean) {
     }
 }
 
+/** The kept configs, to switch between, add, rename and delete, and the one in use to export; imports add one. */
 @Composable
 private fun ConfigSettings() {
     val context = LocalContext.current
     val store = remember { ConfigStore.get(context) }
-    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) {
+    val profiles by store.profiles.collectAsState()
+    val active by store.active.collectAsState()
+    val activeName = profiles.firstOrNull { it.id == active }?.name.orEmpty()
+    var renaming by remember { mutableStateOf<ConfigProfile?>(null) }
+    var deleting by remember { mutableStateOf<ConfigProfile?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) {
         if (it != null) toast(context, exportConfig(context, it, store.config.value))
     }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
         if (it != null) toast(context, importConfig(context, it, store))
     }
-    var confirmImport by remember { mutableStateOf(false) }
-    if (confirmImport) {
-        AlertDialog(
-            onDismissRequest = { confirmImport = false },
-            text = { Text(stringResource(R.string.config_import_confirm)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmImport = false
-                    importLauncher.launch(arrayOf("*/*"))
-                }) { Text(stringResource(R.string.config_import)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmImport = false }) { Text(stringResource(R.string.cancel)) }
-            },
-        )
+    SectionTitle(stringResource(R.string.section_configs))
+    Section {
+        Hint(stringResource(R.string.configs_hint))
+        profiles.forEach { profile ->
+            ProfileRow(
+                profile = profile,
+                active = profile.id == active,
+                onSwitch = { store.switchTo(profile.id) },
+                onRename = { renaming = profile },
+                onDelete = { deleting = profile },
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { store.add(context.getString(R.string.config_new_name, profiles.size + 1)) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.config_new))
+            }
+            OutlinedButton(
+                onClick = { store.add(context.getString(R.string.config_copy_name, activeName), store.config.value) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.config_copy))
+            }
+        }
     }
+    SectionTitle(stringResource(R.string.section_config_files))
     Section {
         Hint(stringResource(R.string.config_hint))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { exportLauncher.launch("slidex-config.json") }, modifier = Modifier.weight(1f)) {
+            OutlinedButton(onClick = { exportLauncher.launch(exportFileName(activeName)) }, modifier = Modifier.weight(1f)) {
                 Text(stringResource(R.string.config_export))
             }
-            OutlinedButton(onClick = { confirmImport = true }, modifier = Modifier.weight(1f)) {
+            OutlinedButton(onClick = { importLauncher.launch(arrayOf("*/*")) }, modifier = Modifier.weight(1f)) {
                 Text(stringResource(R.string.config_import))
             }
         }
     }
+    renaming?.let { profile ->
+        NameDialog(
+            name = profile.name,
+            onDone = { name ->
+                if (name.isNotEmpty()) store.rename(profile.id, name)
+                renaming = null
+            },
+            onDismiss = { renaming = null },
+        )
+    }
+    deleting?.let { profile ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            text = { Text(stringResource(R.string.config_delete_confirm, profile.name)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    store.delete(profile.id)
+                    deleting = null
+                }) { Text(stringResource(R.string.config_delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+}
+
+/** A kept config: a tap switches to it. The one in use cannot be deleted. */
+@Composable
+private fun ProfileRow(
+    profile: ConfigProfile,
+    active: Boolean,
+    onSwitch: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !active, onClick = onSwitch),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = active, onClick = null)
+        Text(
+            profile.name,
+            Modifier
+                .weight(1f)
+                .padding(start = 12.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        IconButton(onClick = onRename) {
+            Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.config_rename))
+        }
+        // Same width with or without the button, so the rows line up.
+        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            if (!active) {
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.config_delete))
+                }
+            }
+        }
+    }
+}
+
+/** Asks for a config's new name. */
+@Composable
+private fun NameDialog(name: String, onDone: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(name) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.config_rename)) },
+        text = {
+            OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true)
+        },
+        confirmButton = {
+            TextButton(onClick = { onDone(text.trim()) }) { Text(stringResource(R.string.done)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
 }
 
 @Composable
@@ -596,6 +829,7 @@ private fun AboutSettings() {
 }
 
 private const val PROJECT_URL = "https://github.com/AlstarKnight/SlideX"
+private const val SHIZUKU_SITE = "https://shizuku.rikka.app/"
 
 /** A row showing what a gesture does; tapping it lists "open the panel" and every action to pick from. */
 @Composable
@@ -641,6 +875,64 @@ private fun ActionChoice(title: String, selected: Action?, onSelect: (Action?) -
         },
     )
 }
+
+/** The shortcuts a long press on the floating icon shows, one row per direction; a tap on a row picks another. */
+@Composable
+private fun BallMenuSettings(prefs: Prefs) {
+    var menu by remember { mutableStateOf(prefs.ballMenu) }
+    var picking by remember { mutableStateOf<Direction?>(null) }
+    fun change(new: Map<Direction, Item>) {
+        menu = new
+        prefs.ballMenu = new
+    }
+    Hint(stringResource(R.string.ball_menu_hint))
+    Direction.entries.forEach { direction ->
+        val item = menu[direction]
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { picking = direction },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(stringResource(direction.labelRes), Modifier.weight(1f))
+            Text(
+                item?.label ?: stringResource(R.string.ball_menu_empty),
+                color = if (item == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // Same width with or without the button, so the names line up.
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                if (item != null) {
+                    IconButton(onClick = { change(menu - direction) }) {
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.ball_menu_clear))
+                    }
+                }
+            }
+        }
+    }
+    val direction = picking ?: return
+    Dialog(onDismissRequest = { picking = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        AddItemSheet(
+            onAdd = { items ->
+                items.firstOrNull()?.let { change(menu + (direction to it)) }
+                picking = null
+            },
+            onDismiss = { picking = null },
+            // The app drawer lives inside the panel.
+            excludedActions = setOf(Action.APP_DRAWER),
+        )
+    }
+}
+
+@get:StringRes
+private val Direction.labelRes: Int
+    get() = when (this) {
+        Direction.UP -> R.string.direction_up
+        Direction.DOWN -> R.string.direction_down
+        Direction.LEFT -> R.string.direction_left
+        Direction.RIGHT -> R.string.direction_right
+    }
 
 /** A row naming the icon pack in use; tapping it lists the installed packs. */
 @Composable
@@ -739,10 +1031,28 @@ private fun AppListRow(prefs: Prefs, mode: AppListMode) {
 
 @Composable
 private fun AppListDialog(title: String, selected: Set<String>, onDone: (Set<String>) -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(Modifier.fillMaxHeight(0.85f), shape = MaterialTheme.shapes.extraLarge) {
+            AppChecklist(title, selected, onDone, onDismiss)
+        }
+    }
+}
+
+/**
+ * Every app with a box to tick, searchable, the [selected] ones first; home screens are listed too, so a setting can
+ * apply to (or leave out) the home screen.
+ */
+@Composable
+fun AppChecklist(
+    title: String,
+    selected: Set<String>,
+    onDone: (Set<String>) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val apps by produceState<List<AppEntry>?>(null) {
         value = withContext(Dispatchers.IO) {
-            // Home screens are listed too, so the trigger can be kept off (or only on) the home screen.
             val all = InstalledApps.load(context) + InstalledApps.load(context, Intent.CATEGORY_HOME)
             // Apps already chosen come first, so they are easy to find and untick.
             all.distinctBy { it.packageName }.sortedBy { it.packageName !in selected }
@@ -750,54 +1060,50 @@ private fun AppListDialog(title: String, selected: Set<String>, onDone: (Set<Str
     }
     var checked by remember { mutableStateOf(selected) }
     var query by remember { mutableStateOf("") }
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(Modifier.fillMaxHeight(0.85f), shape = MaterialTheme.shapes.extraLarge) {
-            Column(Modifier.padding(vertical = 16.dp)) {
-                Text(
-                    title,
-                    Modifier.padding(horizontal = 24.dp),
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    singleLine = true,
-                    placeholder = { Text(stringResource(R.string.search_apps)) },
-                )
-                val list = apps
-                if (list == null) {
-                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                } else {
-                    val filtered = searchApps(list, query) { it.search }
-                    LazyColumn(Modifier.weight(1f)) {
-                        items(filtered, key = { it.packageName }) { app ->
-                            val on = app.packageName in checked
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable { checked = if (on) checked - app.packageName else checked + app.packageName }
-                                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Checkbox(checked = on, onCheckedChange = null)
-                                Box(Modifier.padding(horizontal = 12.dp)) {
-                                    ItemIcon(AppItem(app.label, app.packageName, app.activityName), 32.dp)
-                                }
-                                Text(app.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
+    Column(modifier.padding(vertical = 16.dp)) {
+        Text(
+            title,
+            Modifier.padding(horizontal = 24.dp),
+            style = MaterialTheme.typography.titleLarge,
+        )
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            singleLine = true,
+            placeholder = { Text(stringResource(R.string.search_apps)) },
+        )
+        val list = apps
+        if (list == null) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else {
+            val filtered = searchApps(list, query) { it.search }
+            LazyColumn(Modifier.weight(1f)) {
+                items(filtered, key = { it.packageName }) { app ->
+                    val on = app.packageName in checked
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { checked = if (on) checked - app.packageName else checked + app.packageName }
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = on, onCheckedChange = null)
+                        Box(Modifier.padding(horizontal = 12.dp)) {
+                            ItemIcon(AppItem(app.label, app.packageName, app.activityName), 32.dp)
                         }
+                        Text(app.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                }
-                Row(Modifier.align(Alignment.End).padding(horizontal = 16.dp)) {
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-                    TextButton(onClick = { onDone(checked) }) { Text(stringResource(R.string.done)) }
                 }
             }
+        }
+        Row(Modifier.align(Alignment.End).padding(horizontal = 16.dp)) {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            TextButton(onClick = { onDone(checked) }) { Text(stringResource(R.string.done)) }
         }
     }
 }
@@ -949,29 +1255,41 @@ private fun toast(context: Context, message: Int) {
     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
 }
 
-/** Writes the config to a user-picked file; returns the message to show. */
+/** Writes the config and its background pictures to a user-picked file; returns the message to show. */
 private fun exportConfig(context: Context, uri: Uri, config: PanelConfig): Int {
     try {
         val stream = context.contentResolver.openOutputStream(uri) ?: return R.string.config_io_failed
-        stream.use { it.write(config.toJson().encodeToByteArray()) }
+        stream.use { out ->
+            writeConfigArchive(out, config) { name -> BackgroundImages.file(context, name).takeIf { it.exists() } }
+        }
         return R.string.config_exported
     } catch (e: IOException) {
         return R.string.config_io_failed
     }
 }
 
-/** Replaces the config with a user-picked file; returns the message to show. */
+/** Adds the config in a user-picked file as a new one, named after the file, and switches to it. */
 private fun importConfig(context: Context, uri: Uri, store: ConfigStore): Int {
     try {
         val stream = context.contentResolver.openInputStream(uri) ?: return R.string.config_io_failed
-        val config = parseConfig(stream.use { it.readBytes().decodeToString() })
-        store.update { config }
-        WidgetHost.deleteUnused(context, config)
-        BackgroundImages.deleteUnused(context, config)
+        val config = stream.use { input ->
+            readConfigArchive(input) { name, data -> BackgroundImages.save(context, name, data) }
+        }
+        val name = displayName(context, uri)?.let(::importedConfigName) ?: context.getString(R.string.config_imported_name)
+        store.add(name, config)
         return R.string.config_imported
     } catch (e: IOException) {
         return R.string.config_io_failed
     } catch (e: IllegalArgumentException) {
         return R.string.config_invalid
+    } finally {
+        // Drops pictures in the file that its config does not use, or all of them when the config was invalid.
+        store.deleteUnused()
     }
 }
+
+/** The name of a user-picked file, as the file picker shows it. */
+private fun displayName(context: Context, uri: Uri): String? =
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+    }

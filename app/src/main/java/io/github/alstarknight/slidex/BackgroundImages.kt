@@ -23,6 +23,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.util.UUID
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -75,9 +76,9 @@ object BackgroundImages {
         }
     }
 
-    /** Deletes the saved pictures that no page uses any more. */
-    fun deleteUnused(context: Context, config: PanelConfig) {
-        val used = config.backgrounds()
+    /** Deletes the saved pictures that no page in [configs] uses any more. */
+    fun deleteUnused(context: Context, configs: List<PanelConfig>) {
+        val used = configs.flatMap { it.backgrounds() }.toSet()
         File(context.filesDir, DIR).listFiles()?.forEach { file ->
             if (file.name !in used) {
                 file.delete()
@@ -86,8 +87,16 @@ object BackgroundImages {
         }
     }
 
+    /** Keeps the picture called [name] from an imported config, unless one by that name is already kept. */
+    fun save(context: Context, name: String, data: InputStream) {
+        val file = file(context, name)
+        if (file.exists()) return
+        file.parentFile?.mkdirs()
+        FileOutputStream(file).use { data.copyTo(it) }
+    }
+
     // Only the last part of the name is used, so a name from an imported config cannot point outside the folder.
-    private fun file(context: Context, name: String) = File(File(context.filesDir, DIR), File(name).name)
+    fun file(context: Context, name: String) = File(File(context.filesDir, DIR), File(name).name)
 
     private fun decode(context: Context, uri: Uri, maxSide: Int): Bitmap? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

@@ -13,17 +13,36 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.UUID
 
-/** App-wide holder of the panel config; changes are written to `files/config.json` in the background. */
+/** A kept config: its file is named after [id], and the settings list it by [name]. */
+@Serializable
+data class ConfigProfile(val id: String, val name: String)
+
+/**
+ * App-wide holder of the panel config in use; changes are written to its file in the background. Several configs
+ * can be kept and switched between: the first lives in `files/config.json`, the others in `files/configs`.
+ */
 @OptIn(FlowPreview::class)
-class ConfigStore private constructor(context: Context) {
-    private val file = AtomicFile(File(context.filesDir, "config.json"))
-    private val _config = MutableStateFlow(load(context))
+class ConfigStore private constructor(private val context: Context) {
+    private val prefs = Prefs(context)
+
+    // Held while the config is saved or switched, so a save cannot land in the file of the config switched to.
+    private val lock = Any()
+    private val _active = MutableStateFlow(prefs.activeConfig)
+    private val _config = MutableStateFlow(load(_active.value))
+    private val _profiles = MutableStateFlow(prefs.configProfiles)
+
     val config: StateFlow<PanelConfig> = _config
+
+    /** Id of the config in use. */
+    val active: StateFlow<String> = _active
+
+    val profiles: StateFlow<List<ConfigProfile>> = _profiles
 
     init {
         // Typing in a note or dragging a slider changes the config many times a second; it is written once they pause.
@@ -36,14 +55,62 @@ class ConfigStore private constructor(context: Context) {
         _config.update(transform)
     }
 
-    private fun load(context: Context): PanelConfig {
+    /** Switches to the config [id], saving the one in use first. */
+    fun switchTo(id: String) {
+        synchronized(lock) {
+            if (id == _active.value) return
+            write(file(_active.value), _config.value)
+            prefs.activeConfig = id
+            _active.value = id
+            _config.value = load(id)
+        }
+    }
+
+    /** Keeps [config] as a new config called [name] and switches to it. */
+    fun add(name: String, config: PanelConfig = defaultConfig(context)) {
+        val id = newId()
+        write(file(id), config)
+        setProfiles(_profiles.value + ConfigProfile(id, name))
+        switchTo(id)
+    }
+
+    fun rename(id: String, name: String) {
+        setProfiles(_profiles.value.map { if (it.id == id) it.copy(name = name) else it })
+    }
+
+    /** Deletes the config [id], and the widgets and pictures only it used; the config in use cannot be deleted. */
+    fun delete(id: String) {
+        if (id == _active.value) return
+        file(id).delete()
+        setProfiles(_profiles.value.filterNot { it.id == id })
+        deleteUnused()
+    }
+
+    /** Frees the widgets and deletes the background pictures that no kept config uses any more. */
+    fun deleteUnused() {
+        val configs = _profiles.value.map { if (it.id == _active.value) _config.value else load(it.id) }
+        WidgetHost.deleteUnused(context, configs)
+        BackgroundImages.deleteUnused(context, configs)
+    }
+
+    private fun setProfiles(profiles: List<ConfigProfile>) {
+        _profiles.value = profiles
+        prefs.configProfiles = profiles
+    }
+
+    private fun file(id: String): AtomicFile = AtomicFile(
+        if (id == Prefs.DEFAULT_CONFIG) File(context.filesDir, "config.json") else File(context.filesDir, "configs/$id.json"),
+    )
+
+    private fun load(id: String): PanelConfig {
+        val file = file(id)
         if (!file.baseFile.exists()) return defaultConfig(context)
         return try {
             parseConfig(file.readFully().decodeToString())
         } catch (e: IllegalArgumentException) {
             // Keep the unreadable file for inspection instead of overwriting it.
             Log.w(TAG, "Config is invalid, starting from defaults", e)
-            file.baseFile.renameTo(File(context.filesDir, "config.json.bad"))
+            file.baseFile.renameTo(File(file.baseFile.path + ".bad"))
             defaultConfig(context)
         } catch (e: IOException) {
             Log.w(TAG, "Cannot read config, starting from defaults", e)
@@ -51,9 +118,17 @@ class ConfigStore private constructor(context: Context) {
         }
     }
 
+    // Only the latest config is written: one that a switch has replaced was saved by the switch.
     private fun save(config: PanelConfig) {
+        synchronized(lock) {
+            if (config === _config.value) write(file(_active.value), config)
+        }
+    }
+
+    private fun write(file: AtomicFile, config: PanelConfig) {
         var stream: FileOutputStream? = null
         try {
+            file.baseFile.parentFile?.mkdirs()
             stream = file.startWrite()
             stream.write(config.toJson().encodeToByteArray())
             file.finishWrite(stream)

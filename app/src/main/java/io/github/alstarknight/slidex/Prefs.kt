@@ -3,6 +3,8 @@ package io.github.alstarknight.slidex
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
 
 /** How the panel is opened: a swipe from the edge strip, or a tap on the floating icon. */
 enum class TriggerMode { EDGE, BALL }
@@ -10,6 +12,7 @@ enum class TriggerMode { EDGE, BALL }
 enum class BallShape { CIRCLE, SQUARE }
 
 class Prefs(context: Context) {
+    private val appContext = context.applicationContext
     val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -113,9 +116,35 @@ class Prefs(context: Context) {
         get() = actionPref(KEY_BALL_TAP)
         set(value) = prefs.edit { putString(KEY_BALL_TAP, value?.name) }
 
-    var ballLongPressAction: Action?
-        get() = actionPref(KEY_BALL_LONG_PRESS)
-        set(value) = prefs.edit { putString(KEY_BALL_LONG_PRESS, value?.name) }
+    /** Whether the floating icon vibrates on a tap or long press, as far as the system's touch feedback allows. */
+    var ballHaptics: Boolean
+        get() = prefs.getBoolean(KEY_BALL_HAPTICS, true)
+        set(value) = prefs.edit { putBoolean(KEY_BALL_HAPTICS, value) }
+
+    /** The shortcuts a long press on the floating icon shows around it, one per direction. */
+    var ballMenu: Map<Direction, Item>
+        get() = jsonPref<Map<Direction, Item>>(KEY_BALL_MENU) ?: mapOf(
+            Direction.UP to actionItem(Action.LOCK_SCREEN),
+            Direction.DOWN to actionItem(Action.SCREENSHOT),
+            Direction.LEFT to actionItem(Action.NOTIFICATIONS),
+            Direction.RIGHT to actionItem(Action.POWER_MENU),
+        )
+        set(value) = prefs.edit { putString(KEY_BALL_MENU, json.encodeToString(value)) }
+
+    /** The configs kept, in the order they were made; [ConfigStore] uses the one called [activeConfig]. */
+    var configProfiles: List<ConfigProfile>
+        get() = jsonPref<List<ConfigProfile>>(KEY_CONFIG_PROFILES)
+            ?: listOf(ConfigProfile(DEFAULT_CONFIG, appContext.getString(R.string.config_default_name)))
+        set(value) = prefs.edit { putString(KEY_CONFIG_PROFILES, json.encodeToString(value)) }
+
+    var activeConfig: String
+        get() = prefs.getString(KEY_ACTIVE_CONFIG, null) ?: DEFAULT_CONFIG
+        set(value) = prefs.edit { putString(KEY_ACTIVE_CONFIG, value) }
+
+    /** Fine-tuning of the panel's look on top of the theme. */
+    var appearance: Appearance
+        get() = jsonPref<Appearance>(KEY_APPEARANCE) ?: Appearance()
+        set(value) = prefs.edit { putString(KEY_APPEARANCE, json.encodeToString(value)) }
 
     /** Moves the edge handle in one write, so it does not jump between the two values. */
     fun setHandlePlacement(side: Side, positionPercent: Int) = prefs.edit {
@@ -140,6 +169,20 @@ class Prefs(context: Context) {
     var darkMode: DarkMode
         get() = enumPref(KEY_DARK_MODE, DarkMode.SYSTEM)
         set(value) = prefs.edit { putString(KEY_DARK_MODE, value.name) }
+
+    private fun actionItem(action: Action) = ActionItem(appContext.getString(action.labelRes), action)
+
+    /** A value kept as JSON, or null when it is not set or cannot be read. */
+    private inline fun <reified T> jsonPref(key: String): T? {
+        val text = prefs.getString(key, null) ?: return null
+        return try {
+            json.decodeFromString<T>(text)
+        } catch (e: SerializationException) {
+            null
+        } catch (e: IllegalArgumentException) {
+            null
+        }
+    }
 
     private fun actionPref(key: String): Action? {
         val name = prefs.getString(key, null)
@@ -174,10 +217,22 @@ class Prefs(context: Context) {
         const val KEY_BALL_X = "ball_x"
         const val KEY_BALL_Y = "ball_y"
         const val KEY_BALL_TAP = "ball_tap"
-        const val KEY_BALL_LONG_PRESS = "ball_long_press"
+        const val KEY_BALL_HAPTICS = "ball_haptics"
+        const val KEY_BALL_MENU = "ball_menu"
+        const val KEY_CONFIG_PROFILES = "config_profiles"
+        const val KEY_ACTIVE_CONFIG = "active_config"
+        const val KEY_APPEARANCE = "appearance"
         const val KEY_SHOW_NOTIFICATION = "show_notification"
         const val KEY_ICON_PACK = "icon_pack"
         const val KEY_THEME_PRESET = "theme_preset"
         const val KEY_DARK_MODE = "dark_mode"
+
+        /** The first config, kept where the only one was before there could be several. */
+        const val DEFAULT_CONFIG = "default"
+
+        private val json = Json {
+            ignoreUnknownKeys = true
+            classDiscriminator = "type"
+        }
     }
 }

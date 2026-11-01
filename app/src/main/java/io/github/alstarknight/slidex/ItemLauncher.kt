@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
@@ -26,8 +27,12 @@ import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.core.location.LocationManagerCompat
 import androidx.core.net.toUri
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import java.net.URISyntaxException
 
 val Action.labelRes: Int
@@ -55,6 +60,8 @@ val Action.labelRes: Int
         Action.NFC -> R.string.action_nfc
         Action.AIRPLANE_MODE -> R.string.action_airplane_mode
         Action.AUTO_ROTATE -> R.string.action_auto_rotate
+        Action.FORCE_LANDSCAPE -> R.string.action_force_landscape
+        Action.FORCE_PORTRAIT -> R.string.action_force_portrait
         Action.AUTO_BRIGHTNESS -> R.string.action_auto_brightness
         Action.KEEP_SCREEN_ON -> R.string.action_keep_screen_on
         Action.EYE_CARE -> R.string.action_eye_care
@@ -93,6 +100,8 @@ val Action.iconRes: Int
         Action.NFC -> R.drawable.ic_action_nfc
         Action.AIRPLANE_MODE -> R.drawable.ic_action_flight
         Action.AUTO_ROTATE -> R.drawable.ic_action_screen_rotation
+        Action.FORCE_LANDSCAPE -> R.drawable.ic_action_screen_lock_landscape
+        Action.FORCE_PORTRAIT -> R.drawable.ic_action_screen_lock_portrait
         Action.AUTO_BRIGHTNESS -> R.drawable.ic_action_brightness_auto
         Action.KEEP_SCREEN_ON -> R.drawable.ic_action_coffee
         Action.EYE_CARE -> R.drawable.ic_action_visibility
@@ -106,17 +115,26 @@ val Action.iconRes: Int
         Action.SETTINGS -> R.drawable.ic_action_settings
     }
 
-/** Switches show whether they are on; the ones that cannot be flipped by an app open the system switch instead. */
+/**
+ * Switches show whether they are on; the ones that cannot be flipped by an app open the system switch instead, unless
+ * Shizuku can flip them.
+ */
 val SWITCH_ACTIONS = setOf(
     Action.WIFI, Action.BLUETOOTH, Action.MOBILE_DATA, Action.HOTSPOT, Action.LOCATION, Action.NFC,
-    Action.AIRPLANE_MODE, Action.AUTO_ROTATE, Action.AUTO_BRIGHTNESS, Action.FLASHLIGHT, Action.KEEP_SCREEN_ON,
-    Action.EYE_CARE, Action.SILENT, Action.VIBRATE,
+    Action.AIRPLANE_MODE, Action.AUTO_ROTATE, Action.FORCE_LANDSCAPE, Action.FORCE_PORTRAIT, Action.AUTO_BRIGHTNESS,
+    Action.FLASHLIGHT, Action.KEEP_SCREEN_ON, Action.EYE_CARE, Action.SILENT, Action.VIBRATE,
 )
 
 /** Actions that change something right away, so the panel stays open and shows the new state. */
 private val IN_PLACE_ACTIONS = setOf(
-    Action.FLASHLIGHT, Action.AUTO_ROTATE, Action.AUTO_BRIGHTNESS, Action.KEEP_SCREEN_ON, Action.EYE_CARE,
-    Action.SILENT, Action.VIBRATE,
+    Action.FLASHLIGHT, Action.AUTO_ROTATE, Action.FORCE_LANDSCAPE, Action.FORCE_PORTRAIT, Action.AUTO_BRIGHTNESS,
+    Action.KEEP_SCREEN_ON, Action.EYE_CARE, Action.SILENT, Action.VIBRATE,
+)
+
+/** What the forced landscape and portrait switches turn the screen to; landscape still follows which side is down. */
+private val FORCED_ORIENTATIONS = mapOf(
+    Action.FORCE_LANDSCAPE to ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE,
+    Action.FORCE_PORTRAIT to ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
 )
 
 /** Opens apps and links and runs shortcut actions for panel items. */
@@ -125,6 +143,7 @@ class ItemLauncher(private val context: Context) {
     private val camera = context.getSystemService(CameraManager::class.java)
     private val audio = context.getSystemService(AudioManager::class.java)
     private val overlays = ScreenOverlays(context)
+    private val scope = MainScope()
     private var torchOn = false
     private val torchCallback = object : CameraManager.TorchCallback() {
         override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
@@ -141,7 +160,11 @@ class ItemLauncher(private val context: Context) {
         camera.registerTorchCallback(torchCallback, handler)
     }
 
+    /** Whether a switch has forced landscape or portrait on the screen. */
+    val orientationForced: Boolean get() = overlays.orientation != null
+
     fun release() {
+        scope.cancel()
         camera.unregisterTorchCallback(torchCallback)
         handler.removeCallbacksAndMessages(null)
         overlays.release()
@@ -154,6 +177,12 @@ class ItemLauncher(private val context: Context) {
             is LinkItem -> linkIntent(item.uri)?.let { start(it) } ?: toast(R.string.launch_failed)
             is ActionItem -> {
                 if (item.action in IN_PLACE_ACTIONS) return toggle(item.action)
+                val command = ShizukuShell.switchCommand(item.action, on = !isOn(item.action))
+                    ?.takeIf { ShizukuShell.isReady() }
+                if (command != null) {
+                    flipWithShizuku(command)
+                    return true
+                }
                 // Let the panel finish closing first so it is not in the screenshot and does not take the back key.
                 handler.postDelayed({ perform(item.action) }, ACTION_DELAY_MS)
             }
@@ -176,6 +205,7 @@ class ItemLauncher(private val context: Context) {
                 Action.SILENT -> audio.ringerMode == AudioManager.RINGER_MODE_SILENT
                 Action.VIBRATE -> audio.ringerMode == AudioManager.RINGER_MODE_VIBRATE
                 Action.AUTO_ROTATE -> Settings.System.getInt(resolver, Settings.System.ACCELEROMETER_ROTATION, 0) == 1
+                Action.FORCE_LANDSCAPE, Action.FORCE_PORTRAIT -> overlays.orientation == FORCED_ORIENTATIONS[action]
                 Action.AUTO_BRIGHTNESS -> Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, 0) ==
                     Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
                 Action.WIFI -> context.applicationContext.getSystemService(WifiManager::class.java)?.isWifiEnabled == true
@@ -208,6 +238,11 @@ class ItemLauncher(private val context: Context) {
                 true
             }
             Action.AUTO_ROTATE -> toggleSystemSetting(Settings.System.ACCELEROMETER_ROTATION, on = 1, off = 0)
+            Action.FORCE_LANDSCAPE, Action.FORCE_PORTRAIT -> {
+                val orientation = FORCED_ORIENTATIONS.getValue(action)
+                overlays.orientation = if (overlays.orientation == orientation) null else orientation
+                true
+            }
             Action.AUTO_BRIGHTNESS -> toggleSystemSetting(
                 Settings.System.SCREEN_BRIGHTNESS_MODE,
                 on = Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC,
@@ -235,6 +270,17 @@ class ItemLauncher(private val context: Context) {
             toast(R.string.action_failed)
         }
         return true
+    }
+
+    /** Runs a switch's command through Shizuku, then shows the switch's new state once it has settled. */
+    private fun flipWithShizuku(command: String) {
+        scope.launch {
+            if (!ShizukuShell.run(context, command)) toast(R.string.shizuku_failed)
+            refreshSwitches()
+            // Wi-Fi, Bluetooth and the like take a moment to turn on or off.
+            delay(SWITCH_SETTLE_MS)
+            refreshSwitches()
+        }
     }
 
     /** Switches between [mode] and normal ringing. Leaving or entering silent mode needs Do Not Disturb access. */
@@ -301,7 +347,7 @@ class ItemLauncher(private val context: Context) {
             Action.VOLUME_UP -> volume(AudioManager.ADJUST_RAISE)
             Action.VOLUME_DOWN -> volume(AudioManager.ADJUST_LOWER)
             Action.VOICE_ASSISTANT -> start(Intent(Intent.ACTION_VOICE_COMMAND))
-            // Android 10+ no longer lets apps flip these, so open the system switch for them.
+            // Android 10+ no longer lets apps flip these, so without Shizuku open the system switch for them.
             Action.WIFI -> start(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Intent(Settings.Panel.ACTION_WIFI) else Intent(Settings.ACTION_WIFI_SETTINGS),
             )
@@ -329,8 +375,10 @@ class ItemLauncher(private val context: Context) {
             Action.DIALER -> start(Intent(Intent.ACTION_DIAL))
             Action.SETTINGS -> start(Intent(Settings.ACTION_SETTINGS))
             // In-place switches never get here, and the panel opens the app drawer itself.
-            Action.FLASHLIGHT, Action.AUTO_ROTATE, Action.AUTO_BRIGHTNESS, Action.KEEP_SCREEN_ON, Action.EYE_CARE,
-            Action.SILENT, Action.VIBRATE, Action.APP_DRAWER -> Unit
+            Action.FLASHLIGHT, Action.AUTO_ROTATE, Action.FORCE_LANDSCAPE, Action.FORCE_PORTRAIT,
+            Action.AUTO_BRIGHTNESS, Action.KEEP_SCREEN_ON, Action.EYE_CARE, Action.SILENT, Action.VIBRATE,
+            Action.APP_DRAWER,
+            -> Unit
         }
     }
 
@@ -375,6 +423,7 @@ class ItemLauncher(private val context: Context) {
 
     companion object {
         private const val ACTION_DELAY_MS = 350L
+        private const val SWITCH_SETTLE_MS = 1_500L
 
         /** The system page where the user lets this app change system settings such as auto-rotate and brightness. */
         fun writeSettingsIntent(context: Context) =

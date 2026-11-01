@@ -9,7 +9,12 @@ import kotlinx.serialization.json.Json
 data class PanelConfig(val version: Int = 1, val pages: List<Page> = listOf(Page()))
 
 @Serializable
-data class Page(val cards: List<Card> = emptyList(), val style: PageStyle = PageStyle())
+data class Page(
+    val cards: List<Card> = emptyList(),
+    val style: PageStyle = PageStyle(),
+    /** Apps in which the panel opens on this page instead of the first one, like the original app's 情景模式. */
+    val sceneApps: Set<String> = emptySet(),
+)
 
 /** How one page looks; every page can have its own. */
 @Serializable
@@ -175,6 +180,15 @@ data class UsageCard(
 @Serializable
 enum class UsageKind { RECENT, FREQUENT }
 
+/** How long each app was on screen today, the longest first. */
+@Serializable
+@SerialName("screentime")
+data class ScreenTimeCard(
+    override val id: String,
+    override val title: String,
+    override val showTitle: Boolean = true,
+) : Card
+
 /** Another app's home-screen widget, hosted in the panel under the system-assigned [widgetId]. */
 @Serializable
 @SerialName("widget")
@@ -233,6 +247,8 @@ enum class Action {
     NFC,
     AIRPLANE_MODE,
     AUTO_ROTATE,
+    FORCE_LANDSCAPE,
+    FORCE_PORTRAIT,
     AUTO_BRIGHTNESS,
     KEEP_SCREEN_ON,
     EYE_CARE,
@@ -245,6 +261,10 @@ enum class Action {
     DIALER,
     SETTINGS,
 }
+
+/** The four ways out of the floating icon; its long press shows a shortcut in each. */
+@Serializable
+enum class Direction { UP, DOWN, LEFT, RIGHT }
 
 private val json = Json {
     ignoreUnknownKeys = true

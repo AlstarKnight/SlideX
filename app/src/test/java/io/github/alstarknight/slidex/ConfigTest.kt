@@ -229,4 +229,25 @@ class ConfigTest {
         val text = """{"pages":[{"cards":[]}]}"""
         assertEquals(PageStyle(), parseConfig(text).pages[0].style)
     }
+
+    @Test
+    fun screenTimeCardsRoundTripRenameAndHideTheirTitle() {
+        val withScreenTime = config.addCard(1, ScreenTimeCard("t", "今日使用"))
+        assertEquals(withScreenTime, parseConfig(withScreenTime.toJson()))
+        assertEquals("屏幕时间", withScreenTime.renameCard("t", "屏幕时间").pages[1].cards[0].title)
+        assertEquals(false, withScreenTime.setShowTitle("t", false).pages[1].cards[0].showTitle)
+    }
+
+    @Test
+    fun scenesOpenTheirPageAndAnAppOpensOnlyOne() {
+        val scenes = config.setSceneApps(1, setOf("com.tencent.mm", "tv.danmaku.bili"))
+        assertEquals(scenes, parseConfig(scenes.toJson()))
+        assertEquals(1, scenes.scenePage("com.tencent.mm"))
+        assertEquals(0, scenes.scenePage("com.android.chrome"))
+        assertEquals(0, scenes.scenePage(null))
+        val moved = scenes.setSceneApps(0, setOf("com.tencent.mm"))
+        assertEquals(0, moved.scenePage("com.tencent.mm"))
+        assertEquals(setOf("tv.danmaku.bili"), moved.pages[1].sceneApps)
+        assertEquals(0, scenes.movePage(1, -1).scenePage("com.tencent.mm"))
+    }
 }
