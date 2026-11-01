@@ -61,6 +61,20 @@ fun PanelConfig.setShowTitle(cardId: String, show: Boolean): PanelConfig = mapCa
     }
 }
 
+/** Changes a card's width and its own look. */
+fun PanelConfig.setCardStyle(cardId: String, transform: (CardStyle) -> CardStyle): PanelConfig = mapCard(cardId) {
+    when (it) {
+        is GridCard -> it.copy(style = transform(it.style))
+        is NoteCard -> it.copy(style = transform(it.style))
+        is TextCard -> it.copy(style = transform(it.style))
+        is HitokotoCard -> it.copy(style = transform(it.style))
+        is SystemCard -> it.copy(style = transform(it.style))
+        is UsageCard -> it.copy(style = transform(it.style))
+        is ScreenTimeCard -> it.copy(style = transform(it.style))
+        is WidgetCard -> it.copy(style = transform(it.style))
+    }
+}
+
 /** Shows or hides the names under the icons of an icon or usage card. */
 fun PanelConfig.setShowLabels(cardId: String, show: Boolean): PanelConfig = mapCard(cardId) {
     when (it) {

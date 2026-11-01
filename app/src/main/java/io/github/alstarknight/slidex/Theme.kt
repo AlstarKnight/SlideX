@@ -103,6 +103,21 @@ val LocalAppearance = staticCompositionLocalOf { Appearance() }
 /** A color from [Appearance]. */
 fun appearanceColor(hex: String): Color = Color(hex.toColorInt())
 
+/** A color from a card, which may come from an imported file; null when it is not a color. */
+fun cardColor(hex: String): Color? = try {
+    Color(hex.toColorInt())
+} catch (e: IllegalArgumentException) {
+    null
+}
+
+/** The look inside a card with its own [style]: its padding, names and switches, else these. */
+fun Appearance.forCard(style: CardStyle): Appearance = copy(
+    cardPaddingDp = style.paddingDp?.coerceIn(CARD_PADDING_RANGE) ?: cardPaddingDp,
+    labelSizeSp = style.labelSizeSp?.coerceIn(LABEL_SIZE_RANGE) ?: labelSizeSp,
+    switchOnColor = style.switchOnColor?.takeIf { cardColor(it) != null } ?: switchOnColor,
+    switchOffColor = style.switchOffColor?.takeIf { cardColor(it) != null } ?: switchOffColor,
+)
+
 /** Dark or white text, whichever reads better on [background]. */
 fun contentColorOn(background: Color): Color = if (background.luminance() > 0.5f) Color(0xFF1D1B20) else Color.White
 

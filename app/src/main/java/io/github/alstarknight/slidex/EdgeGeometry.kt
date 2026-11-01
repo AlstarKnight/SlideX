@@ -47,6 +47,15 @@ fun nearestSide(x: Float, screenWidth: Int): Side = if (x < screenWidth / 2f) Si
 fun centeredOffset(length: Int, size: Int, fraction: Float): Int =
     (length * fraction - size / 2f).roundToInt().coerceIn(0, (length - size).coerceAtLeast(0))
 
+/**
+ * Left edge of the floating icon, [size] wide at [x], moved against the side edge of a screen [screenWidth] wide
+ * that it is nearer to, or half past that edge when [tucked].
+ */
+fun edgeOffset(screenWidth: Int, size: Int, x: Int, tucked: Boolean): Int {
+    val tuck = if (tucked) size / 2 else 0
+    return if (nearestSide(x + size / 2f, screenWidth) == Side.LEFT) -tuck else screenWidth - size + tuck
+}
+
 /** Inverse of [centeredOffset]: where the center is, as a fraction of [length]. */
 fun centerFraction(length: Int, size: Int, offset: Int): Float =
     if (length <= 0) 0.5f else ((offset + size / 2f) / length).coerceIn(0f, 1f)

@@ -75,4 +75,4 @@ jobs:
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "SlideX 最新测试版" \
-            --notes "自动构建，来自分支 ${BRANCH}（构建提交 ${GITHUB_SHA::7}）。每次 CI 编译后都会替换。"
+            --notes "自动构建 #${GITHUB_RUN_NUMBER}，来自分支 ${BRANCH}（构建提交 ${GITHUB_SHA::7}）。每次 CI 编译后都会替换。"

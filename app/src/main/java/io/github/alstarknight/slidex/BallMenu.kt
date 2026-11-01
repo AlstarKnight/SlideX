@@ -56,6 +56,8 @@ class BallMenu(
     private var items: Map<Direction, Item> = emptyMap()
     private var selected by mutableStateOf<Direction?>(null)
 
+    val shown: Boolean get() = view != null
+
     /** Shows [items] around an icon [iconSize] pixels wide whose center is at screen [x], [y]. */
     fun show(items: Map<Direction, Item>, x: Float, y: Float, iconSize: Int) {
         if (view != null) return

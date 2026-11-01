@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Point
+import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.os.Build
 import android.view.Gravity
@@ -25,7 +26,8 @@ private enum class BallGesture { MOVE, PULL, MENU }
 /**
  * Floating icon that can be dragged anywhere. A tap runs [onTap]; a sideways swipe into the screen pulls the panel
  * out ([onPullStart] with the finger's screen x, then [onPull], and [onPullEnd] with its sideways speed); a long press
- * shows the shortcuts around the icon, and [onPick] runs the one picked.
+ * shows the shortcuts around the icon, and [onPick] runs the one picked. Left alone for a while, it can fade or tuck
+ * half into the edge, as set in [Prefs.ballIdle].
  */
 class FloatingBall(
     context: Context,
@@ -38,14 +40,27 @@ class FloatingBall(
     onPick: (Item) -> Unit,
 ) {
     private val density = context.resources.displayMetrics.density
-    private val view = BallView(context, onMoveStart = ::onMoveStart, onMove = ::onMove, onRelease = ::onRelease)
+    private val view = BallView(
+        context,
+        onPress = ::onPress,
+        onMoveStart = ::onMoveStart,
+        onMove = ::onMove,
+        onRelease = ::onRelease,
+    )
     private val menu = BallMenu(context, windowManager, onPick)
     private var gesture: BallGesture? = null
+
+    /** Whether the icon has been left alone long enough to fade or tuck in. */
+    private var idle = false
+    private var pressed = false
+    private val goIdle = Runnable { if (pressed || menu.shown) scheduleIdle() else setIdle(true) }
     private val params = WindowManager.LayoutParams(
         0,
         0,
         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+        // No limits, so a tucked-in icon can reach past the screen's edge.
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
         PixelFormat.TRANSLUCENT,
     ).apply {
         gravity = Gravity.TOP or Gravity.LEFT
@@ -68,6 +83,8 @@ class FloatingBall(
     var visible: Boolean
         get() = view.visibility == View.VISIBLE
         set(value) {
+            // Each time it comes back it shows in full first.
+            if (value && !visible) wake()
             view.visibility = if (value) View.VISIBLE else View.GONE
             if (!value) menu.hide()
         }
@@ -87,6 +104,7 @@ class FloatingBall(
     fun add() {
         applyPrefs()
         windowManager.addView(view, params)
+        scheduleIdle()
     }
 
     /** Re-reads size, shape, opacity and position, e.g. after a settings change or a rotation. */
@@ -94,9 +112,12 @@ class FloatingBall(
         if (gesture == BallGesture.MOVE) return
         applyPrefs()
         windowManager.updateViewLayout(view, params)
+        // The idle look may have just been turned on, so the wait starts over.
+        if (!idle) scheduleIdle()
     }
 
     fun remove() {
+        view.removeCallbacks(goIdle)
         menu.hide()
         windowManager.removeView(view)
     }
@@ -104,14 +125,39 @@ class FloatingBall(
     private fun applyPrefs() {
         val size = (prefs.ballSizeDp * density).roundToInt()
         val screen = windowManager.screenSize()
+        val idleLook = prefs.ballIdle
         params.width = size
         params.height = size
         params.x = centeredOffset(screen.x, size, prefs.ballX)
+        // An icon that tucks in keeps to the nearer side edge.
+        if (idleLook == BallIdle.TUCK) params.x = edgeOffset(screen.x, size, params.x, tucked = idle)
         val top = centeredOffset(screen.y, size, prefs.ballY)
         params.y = aboveKeyboard(top, size, keyboardTop, (KEYBOARD_GAP_DP * density).roundToInt())
         view.shape = prefs.ballShape
-        view.alpha = prefs.ballOpacityPercent / 100f
+        view.alpha = prefs.ballOpacityPercent / 100f * if (idle && idleLook == BallIdle.FADE) IDLE_ALPHA else 1f
         view.isHapticFeedbackEnabled = prefs.ballHaptics
+    }
+
+    /** A finger on the icon brings it back in full; once it lifts, the icon goes idle again after a while. */
+    private fun onPress(pressed: Boolean) {
+        this.pressed = pressed
+        if (pressed) setIdle(false) else scheduleIdle()
+    }
+
+    private fun wake() {
+        setIdle(false)
+        scheduleIdle()
+    }
+
+    private fun scheduleIdle() {
+        view.removeCallbacks(goIdle)
+        if (prefs.ballIdle != BallIdle.NONE) view.postDelayed(goIdle, IDLE_DELAY_MS)
+    }
+
+    private fun setIdle(value: Boolean) {
+        if (idle == value) return
+        idle = value
+        update()
     }
 
     /** Shows the shortcuts around the icon; returns false when none is set. */
@@ -155,6 +201,10 @@ class FloatingBall(
             // Remember where the icon was dropped, relative to the screen size so it survives rotation.
             BallGesture.MOVE -> {
                 val screen = windowManager.screenSize()
+                if (prefs.ballIdle == BallIdle.TUCK) {
+                    params.x = edgeOffset(screen.x, params.width, params.x, tucked = false)
+                    windowManager.updateViewLayout(view, params)
+                }
                 prefs.setBallPosition(
                     centerFraction(screen.x, params.width, params.x),
                     centerFraction(screen.y, params.height, params.y),
@@ -174,6 +224,12 @@ class FloatingBall(
 
 private const val KEYBOARD_GAP_DP = 12
 
+/** How long the icon is left alone before it fades or tucks in. */
+private const val IDLE_DELAY_MS = 3000L
+
+/** How much of its opacity a faded icon keeps. */
+private const val IDLE_ALPHA = 0.4f
+
 /** How far a finger held on the icon moves toward a shortcut to pick it. */
 private const val MENU_SELECT_DP = 24
 
@@ -187,13 +243,15 @@ fun WindowManager.screenSize(): Point =
     }
 
 /**
- * The app icon clipped to a circle or a rounded square. Once the finger moves past the touch slop it reports
- * [onMoveStart] and then every [onMove], and [onRelease] with the sideways speed when it lifts; after a long press it
- * reports moves and the release without [onMoveStart]. A touch that does neither is a click.
+ * The app icon clipped to a circle or a rounded square. Every touch reports [onPress] when it starts and ends. Once
+ * the finger moves past the touch slop it reports [onMoveStart] and then every [onMove], and [onRelease] with the
+ * sideways speed when it lifts; after a long press it reports moves and the release without [onMoveStart]. A touch
+ * that does neither is a click.
  */
 @SuppressLint("ViewConstructor")
 private class BallView(
     context: Context,
+    private val onPress: (pressed: Boolean) -> Unit,
     private val onMoveStart: (dx: Float, dy: Float, rawX: Float) -> Unit,
     private val onMove: (dx: Float, dy: Float, rawX: Float) -> Unit,
     private val onRelease: (dx: Float, dy: Float, velocityX: Float) -> Unit,
@@ -222,6 +280,14 @@ private class BallView(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         updateClip()
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        // Keep the system back gesture from taking swipes that start on an icon at the edge.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            systemGestureExclusionRects = listOf(Rect(0, 0, width, height))
+        }
     }
 
     private fun updateClip() {
@@ -266,6 +332,7 @@ private class BallView(
                 moved = false
                 longPressed = false
                 postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
+                onPress(true)
             }
             MotionEvent.ACTION_MOVE -> {
                 val dx = event.rawX - downX
@@ -292,6 +359,7 @@ private class BallView(
                     up -> performClick()
                 }
                 tracker?.recycle()
+                onPress(false)
             }
         }
         return true
