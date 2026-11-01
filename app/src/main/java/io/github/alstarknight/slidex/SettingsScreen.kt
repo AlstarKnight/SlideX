@@ -4,6 +4,8 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationManager
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -437,6 +439,20 @@ private fun FloatingBallSettings(prefs: Prefs, accessibilityEnabled: Boolean) {
         SliderRow(stringResource(R.string.setting_ball_opacity), "%", prefs.ballOpacityPercent, 30..100) {
             prefs.ballOpacityPercent = it
         }
+        var idle by remember { mutableStateOf(prefs.ballIdle) }
+        ChoiceRow(
+            stringResource(R.string.setting_ball_idle),
+            listOf(
+                BallIdle.NONE to R.string.ball_idle_none,
+                BallIdle.FADE to R.string.ball_idle_fade,
+                BallIdle.TUCK to R.string.ball_idle_tuck,
+            ),
+            idle,
+        ) {
+            idle = it
+            prefs.ballIdle = it
+        }
+        Hint(stringResource(R.string.ball_idle_hint))
         Hint(stringResource(R.string.ball_hint))
     }
     SectionTitle(stringResource(R.string.section_ball_actions))
@@ -566,9 +582,17 @@ private fun AppearanceSettings(prefs: Prefs) {
     }
 }
 
-/** A title over one swatch per color to pick, after a chip that follows the theme; it keeps its own selection. */
+/**
+ * A title over one swatch per color to pick, after a chip, [followLabel], that picks none; it keeps its own
+ * selection.
+ */
 @Composable
-private fun ColorChoice(title: String, initial: String?, onSelect: (String?) -> Unit) {
+fun ColorChoice(
+    title: String,
+    initial: String?,
+    @StringRes followLabel: Int = R.string.color_follow_theme,
+    onSelect: (String?) -> Unit,
+) {
     var selected by remember { mutableStateOf(initial) }
     fun select(color: String?) {
         selected = color
@@ -584,7 +608,7 @@ private fun ColorChoice(title: String, initial: String?, onSelect: (String?) -> 
             FilterChip(
                 selected = selected == null,
                 onClick = { select(null) },
-                label = { Text(stringResource(R.string.color_follow_theme)) },
+                label = { Text(stringResource(followLabel)) },
             )
             SWATCHES.forEach { color ->
                 val chosen = color == selected
@@ -605,7 +629,7 @@ private fun ColorChoice(title: String, initial: String?, onSelect: (String?) -> 
     }
 }
 
-/** Colors offered for the panel's background and switches: light and dark neutrals, soft tints and strong colors. */
+/** Colors offered for the panel's background, cards and switches: light and dark neutrals, soft tints, strong colors. */
 private val SWATCHES = listOf(
     "#FFFFFF", "#F2F2F7", "#FFF8E7", "#E8F0FE", "#E6F4EA", "#FCE8F0",
     "#1C1C1E", "#000000", "#0E1024", "#1F2A44",
@@ -808,6 +832,10 @@ private fun AboutSettings() {
     }
     Section {
         Text(stringResource(R.string.about_version, stringResource(R.string.app_name), version.orEmpty()))
+        // Which CI build this is, to tell test builds apart; a local build has no number.
+        if (BuildConfig.BUILD_NUMBER.isNotEmpty()) {
+            Hint(stringResource(R.string.about_build, BuildConfig.BUILD_NUMBER, BuildConfig.BUILD_COMMIT))
+        }
         Row(
             Modifier
                 .fillMaxWidth()
@@ -826,6 +854,36 @@ private fun AboutSettings() {
         }
         Hint(stringResource(R.string.about_credits))
     }
+    SectionTitle(stringResource(R.string.crash_log_title))
+    Section { CrashLogSettings() }
+}
+
+/** How many crashes [CrashLog] kept and when the last one was, with buttons to copy the reports and clear them. */
+@Composable
+private fun CrashLogSettings() {
+    val context = LocalContext.current
+    var log by remember { mutableStateOf(CrashLog.read(context)) }
+    val times = remember(log) { crashTimes(log) }
+    if (times.isEmpty()) {
+        Text(stringResource(R.string.crash_log_none))
+    } else {
+        Text(stringResource(R.string.crash_log_summary, times.size, times.last()))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { copyText(context, log) }, modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.crash_log_copy))
+            }
+            OutlinedButton(
+                onClick = {
+                    CrashLog.clear(context)
+                    log = ""
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.crash_log_clear))
+            }
+        }
+    }
+    Hint(stringResource(R.string.crash_log_hint))
 }
 
 private const val PROJECT_URL = "https://github.com/AlstarKnight/SlideX"
@@ -1253,6 +1311,13 @@ private fun batteryOptimizationIntent(context: Context) =
 
 private fun toast(context: Context, message: Int) {
     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+}
+
+/** Puts [text] on the clipboard; Android 13 and later confirm it on their own, so only older ones get a toast. */
+private fun copyText(context: Context, text: String) {
+    val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
+    clipboard.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.crash_log_title), text))
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) toast(context, R.string.crash_log_copied)
 }
 
 /** Writes the config and its background pictures to a user-picked file; returns the message to show. */

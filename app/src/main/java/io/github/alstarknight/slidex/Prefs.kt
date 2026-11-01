@@ -11,6 +11,9 @@ enum class TriggerMode { EDGE, BALL }
 
 enum class BallShape { CIRCLE, SQUARE }
 
+/** What the floating icon does when it has not been touched for a while: stay, fade, or tuck half into the edge. */
+enum class BallIdle { NONE, FADE, TUCK }
+
 class Prefs(context: Context) {
     private val appContext = context.applicationContext
     val prefs: SharedPreferences =
@@ -101,6 +104,10 @@ class Prefs(context: Context) {
     var ballOpacityPercent: Int
         get() = prefs.getInt(KEY_BALL_OPACITY, 100)
         set(value) = prefs.edit { putInt(KEY_BALL_OPACITY, value) }
+
+    var ballIdle: BallIdle
+        get() = enumPref(KEY_BALL_IDLE, BallIdle.NONE)
+        set(value) = prefs.edit { putString(KEY_BALL_IDLE, value.name) }
 
     /** Center of the floating icon, as fractions of the screen width and height. */
     val ballX: Float get() = prefs.getFloat(KEY_BALL_X, 1f)
@@ -214,6 +221,7 @@ class Prefs(context: Context) {
         const val KEY_BALL_SHAPE = "ball_shape"
         const val KEY_BALL_SIZE = "ball_size"
         const val KEY_BALL_OPACITY = "ball_opacity"
+        const val KEY_BALL_IDLE = "ball_idle"
         const val KEY_BALL_X = "ball_x"
         const val KEY_BALL_Y = "ball_y"
         const val KEY_BALL_TAP = "ball_tap"

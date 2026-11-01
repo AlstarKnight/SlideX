@@ -30,13 +30,24 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 
 /**
- * One card's own options, shown under it while it is edited in the panel: its title, the names under its icons and
- * their spacing, its height, and a text card's text style.
+ * One card's own options, shown under it while it is edited in the panel: its width, its title, the names under its
+ * icons and their spacing, its height, a text card's text style, and its own look.
  */
 @Composable
 fun CardStyleControls(card: Card, store: ConfigStore) {
+    fun updateStyle(transform: (CardStyle) -> CardStyle) = store.update { it.setCardStyle(card.id, transform) }
     Column(Modifier.padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         HorizontalDivider()
+        ChoiceRow(
+            stringResource(R.string.card_width),
+            listOf(
+                CardWidth.FULL to R.string.card_width_full,
+                CardWidth.HALF to R.string.card_width_half,
+                CardWidth.THIRD to R.string.card_width_third,
+            ),
+            card.style.width,
+        ) { width -> updateStyle { it.copy(width = width) } }
+        Hint(stringResource(R.string.card_width_hint))
         // A text card never shows its title.
         if (card !is TextCard) {
             SwitchRow(stringResource(R.string.card_show_title), card.showTitle) { show ->
@@ -94,6 +105,76 @@ fun CardStyleControls(card: Card, store: ConfigStore) {
             ) { dp -> store.update { it.setCardHeight(card.id, dp) } }
         }
         if (card is TextCard) TextStyleRows(card, store)
+        HorizontalDivider()
+        CardLookRows(card) { transform -> updateStyle(transform) }
+    }
+}
+
+/**
+ * The card's own corners, padding and color, and the size of its icons' names and color of its switches; each
+ * option's "default" follows the look all cards share, set in the settings.
+ */
+@Composable
+private fun CardLookRows(card: Card, update: ((CardStyle) -> CardStyle) -> Unit) {
+    val style = card.style
+    val default = R.string.style_default
+    Text(stringResource(R.string.card_look), style = MaterialTheme.typography.titleSmall)
+    // A text card straight on the page has no corners or color of its own.
+    val onCard = card !is TextCard || card.cardBackground
+    if (onCard) {
+        DefaultSliderRow(
+            stringResource(R.string.setting_card_radius),
+            "dp",
+            style.cornerRadiusDp,
+            CARD_RADIUS_RANGE,
+        ) { value -> update { it.copy(cornerRadiusDp = value) } }
+    }
+    DefaultSliderRow(
+        stringResource(R.string.setting_card_padding),
+        "dp",
+        style.paddingDp,
+        CARD_PADDING_RANGE,
+    ) { value -> update { it.copy(paddingDp = value) } }
+    if (onCard) {
+        ColorChoice(stringResource(R.string.card_color), style.color, followLabel = default) { color ->
+            update { it.copy(color = color) }
+        }
+    }
+    val showsLabels = when (card) {
+        is GridCard -> card.showLabels
+        is UsageCard -> card.showLabels
+        else -> false
+    }
+    if (showsLabels) {
+        DefaultSliderRow(
+            stringResource(R.string.setting_label_size),
+            "sp",
+            style.labelSizeSp,
+            LABEL_SIZE_RANGE,
+        ) { value -> update { it.copy(labelSizeSp = value) } }
+    }
+    if (card is GridCard && card.items.any { it is ActionItem && it.action in SWITCH_ACTIONS }) {
+        ColorChoice(
+            stringResource(R.string.setting_switch_on_color),
+            style.switchOnColor,
+            followLabel = default,
+        ) { color -> update { it.copy(switchOnColor = color) } }
+        ColorChoice(
+            stringResource(R.string.setting_switch_off_color),
+            style.switchOffColor,
+            followLabel = default,
+        ) { color -> update { it.copy(switchOffColor = color) } }
+    }
+    Hint(stringResource(R.string.card_look_hint))
+}
+
+/** A [SliderRow] over [range] with one more stop before it, "default", which stands for null. */
+@Composable
+private fun DefaultSliderRow(title: String, unit: String, value: Int?, range: IntRange, onChange: (Int?) -> Unit) {
+    val default = stringResource(R.string.style_default)
+    val stop = range.first - 1
+    SliderRow(title, unit, value ?: stop, stop..range.last, valueText = { if (it == stop) default else "$it$unit" }) {
+        onChange(it.takeIf { picked -> picked != stop })
     }
 }
 

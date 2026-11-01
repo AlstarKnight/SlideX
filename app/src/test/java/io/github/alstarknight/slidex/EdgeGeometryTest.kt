@@ -88,6 +88,17 @@ class EdgeGeometryTest {
     }
 
     @Test
+    fun aTuckingIconKeepsToTheNearerEdgeAndHidesHalfPastIt() {
+        assertEquals(0, edgeOffset(screenWidth = 1000, size = 100, x = 300, tucked = false))
+        assertEquals(-50, edgeOffset(screenWidth = 1000, size = 100, x = 300, tucked = true))
+        assertEquals(900, edgeOffset(screenWidth = 1000, size = 100, x = 600, tucked = false))
+        assertEquals(950, edgeOffset(screenWidth = 1000, size = 100, x = 600, tucked = true))
+        // Once tucked in, it is still nearer the same edge.
+        assertEquals(-50, edgeOffset(screenWidth = 1000, size = 100, x = -50, tucked = true))
+        assertEquals(950, edgeOffset(screenWidth = 1000, size = 100, x = 950, tucked = true))
+    }
+
+    @Test
     fun iconMovesAboveTheKeyboardOnlyWhenItWouldOverlap() {
         assertEquals(1000, aboveKeyboard(top = 1000, size = 100, keyboardTop = null, gap = 20))
         assertEquals(500, aboveKeyboard(top = 500, size = 100, keyboardTop = 1500, gap = 20))

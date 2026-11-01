@@ -73,6 +73,47 @@ sealed interface Card {
 
     /** Whether the title is shown above the card's content; edit mode always shows it. */
     val showTitle: Boolean
+
+    /** The card's width and its own look, over the panel's. */
+    val style: CardStyle
+}
+
+/** One card's width and own look; each null follows the look all cards share. */
+@Serializable
+data class CardStyle(
+    val width: CardWidth = CardWidth.FULL,
+    val cornerRadiusDp: Int? = null,
+    /** Color of the card as `#RRGGBB`. */
+    val color: String? = null,
+    /** Space between the card's edges and its content in dp, across; up and down it is two thirds of that. */
+    val paddingDp: Int? = null,
+    /** Size of the names under the icons in sp. */
+    val labelSizeSp: Int? = null,
+    val switchOnColor: String? = null,
+    val switchOffColor: String? = null,
+)
+
+/** How much of a row a card takes, in [ROW_UNITS]; narrower cards share a row with the cards after them. */
+@Serializable
+enum class CardWidth(val units: Int) { FULL(6), HALF(3), THIRD(2) }
+
+/** Units in a row of cards. */
+const val ROW_UNITS = 6
+
+/** [cards] in the rows they are shown in: each row takes the next cards while their widths add up to a row. */
+fun cardRows(cards: List<Card>): List<List<Card>> {
+    val rows = mutableListOf<MutableList<Card>>()
+    var used = ROW_UNITS
+    for (card in cards) {
+        val units = card.style.width.units
+        if (used + units > ROW_UNITS) {
+            rows += mutableListOf<Card>()
+            used = 0
+        }
+        rows.last() += card
+        used += units
+    }
+    return rows
 }
 
 /** A titled grid of icons (apps, links, shortcuts), like the original app's cards. */
@@ -94,10 +135,11 @@ data class GridCard(
      * gives them a set size for the number of [columns].
      */
     val columnGapDp: Int? = null,
+    override val style: CardStyle = CardStyle(),
 ) : Card
 
 const val DEFAULT_COLUMNS = 4
-val COLUMN_RANGE = 2..6
+val COLUMN_RANGE = 1..6
 const val DEFAULT_ROW_GAP = 16
 val ROW_GAP_RANGE = 0..40
 val COLUMN_GAP_RANGE = 0..64
@@ -110,6 +152,7 @@ data class NoteCard(
     val text: String = "",
     val heightDp: Int = AUTO_HEIGHT,
     override val showTitle: Boolean = true,
+    override val style: CardStyle = CardStyle(),
 ) : Card
 
 /** Text shown as it is, like the original app's text module: a heading, a motto, a reminder. */
@@ -129,6 +172,7 @@ data class TextCard(
     /** Whether the text sits on a card like the others, or straight on the page. */
     val cardBackground: Boolean = false,
     val heightDp: Int = AUTO_HEIGHT,
+    override val style: CardStyle = CardStyle(),
 ) : Card {
     /** Only the text is shown; the title just names the card in edit mode. */
     override val showTitle: Boolean get() = false
@@ -144,6 +188,7 @@ data class HitokotoCard(
     override val id: String,
     override val title: String,
     override val showTitle: Boolean = true,
+    override val style: CardStyle = CardStyle(),
 ) : Card
 
 /** Height of text and note cards: [AUTO_HEIGHT] fits the content, anything else is a fixed height in dp. */
@@ -158,6 +203,7 @@ data class SystemCard(
     override val title: String,
     val kind: SystemKind,
     override val showTitle: Boolean = true,
+    override val style: CardStyle = CardStyle(),
 ) : Card
 
 @Serializable
@@ -175,6 +221,7 @@ data class UsageCard(
     val showLabels: Boolean = true,
     val rowGapDp: Int = DEFAULT_ROW_GAP,
     val columnGapDp: Int? = null,
+    override val style: CardStyle = CardStyle(),
 ) : Card
 
 @Serializable
@@ -187,6 +234,7 @@ data class ScreenTimeCard(
     override val id: String,
     override val title: String,
     override val showTitle: Boolean = true,
+    override val style: CardStyle = CardStyle(),
 ) : Card
 
 /** Another app's home-screen widget, hosted in the panel under the system-assigned [widgetId]. */
@@ -198,6 +246,7 @@ data class WidgetCard(
     val widgetId: Int,
     val heightDp: Int = DEFAULT_WIDGET_HEIGHT,
     override val showTitle: Boolean = true,
+    override val style: CardStyle = CardStyle(),
 ) : Card
 
 const val DEFAULT_WIDGET_HEIGHT = 180

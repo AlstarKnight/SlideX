@@ -19,6 +19,9 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        // Shown on the About page and in crash reports, to tell which CI build is installed; empty when built locally.
+        buildConfigField("String", "BUILD_NUMBER", "\"${System.getenv("GITHUB_RUN_NUMBER").orEmpty()}\"")
+        buildConfigField("String", "BUILD_COMMIT", "\"${System.getenv("GITHUB_SHA").orEmpty().take(7)}\"")
     }
 
     signingConfigs {
@@ -48,6 +51,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

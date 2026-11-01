@@ -61,6 +61,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -77,11 +78,13 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -93,14 +96,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.coerceAtLeast
+import androidx.compose.ui.unit.coerceAtMost
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.core.graphics.toColorInt
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -170,52 +176,68 @@ fun PanelContent(
                         } else {
                             drag.order.mapNotNull { id -> page.cards.firstOrNull { it.id == id } }
                         }
+                        // While the page or one of its cards is edited, every card takes a whole row, which leaves
+                        // room for its buttons and options and lets it be dragged.
+                        val stacked = editingPage || page.cards.any { it.id == editingCard }
+                        val rows = if (stacked) shownCards.map { listOf(it) } else cardRows(shownCards)
                         LazyColumn(
                             Modifier.fillMaxSize(),
                             state = listState,
                             contentPadding = PaddingValues(appearance.panelPaddingDp.dp),
                             verticalArrangement = Arrangement.spacedBy(appearance.cardGapDp.dp),
                         ) {
-                            items(shownCards, key = { it.id }) { card ->
-                                PanelCard(
-                                    card = card,
-                                    modifier = if (card.id == drag.cardId) {
+                            items(rows, key = { it.first().id }) { row ->
+                                val dragged = row.singleOrNull()?.id?.takeIf { it == drag.cardId }
+                                CardRow(
+                                    widths = row.map { if (stacked) ROW_UNITS else it.style.width.units },
+                                    gap = appearance.cardGapDp.dp,
+                                    modifier = if (dragged != null) {
                                         Modifier
                                             .zIndex(1f)
-                                            .graphicsLayer { translationY = drag.offsetOf(card.id) }
+                                            .graphicsLayer { translationY = drag.offsetOf(dragged) }
                                     } else {
                                         Modifier.animateItem()
                                     },
-                                    dragHandle = Modifier.pointerInput(card.id) {
-                                        detectDragGestures(
-                                            onDragStart = { drag.start(card.id, cardIds) },
-                                            onDragEnd = {
-                                                drag.end()?.let { (id, offset) -> store.update { it.moveCard(id, offset) } }
+                                ) {
+                                    row.forEach { card ->
+                                        PanelCard(
+                                            card = card,
+                                            dragHandle = Modifier.pointerInput(card.id) {
+                                                detectDragGestures(
+                                                    onDragStart = { drag.start(card.id, cardIds) },
+                                                    onDragEnd = {
+                                                        drag.end()?.let { (id, offset) ->
+                                                            store.update { it.moveCard(id, offset) }
+                                                        }
+                                                    },
+                                                    onDragCancel = drag::cancel,
+                                                    onDrag = { change, amount ->
+                                                        change.consume()
+                                                        drag.drag(amount.y)
+                                                    },
+                                                )
                                             },
-                                            onDragCancel = drag::cancel,
-                                            onDrag = { change, amount ->
-                                                change.consume()
-                                                drag.drag(amount.y)
+                                            editing = card.id == editingCard,
+                                            pageEditing = editingPage,
+                                            switches = switches,
+                                            onStartEditing = { editingCard = card.id },
+                                            onDoneEditing = { editingCard = null },
+                                            onLaunch = { item ->
+                                                when {
+                                                    item is ActionItem && item.action == Action.APP_DRAWER ->
+                                                        showingDrawer = true
+                                                    !launcher.launch(item) -> onClose()
+                                                }
                                             },
+                                            store = store,
+                                            onAddItem = { addingToCard = card.id },
+                                            onRenameItem = { index -> renamingItem = card.id to index },
+                                            onClose = onClose,
+                                            cardOpacity = 1f -
+                                                page.style.cardTransparency.coerceIn(TRANSPARENCY_RANGE) / 100f,
                                         )
-                                    },
-                                    editing = card.id == editingCard,
-                                    pageEditing = editingPage,
-                                    switches = switches,
-                                    onStartEditing = { editingCard = card.id },
-                                    onDoneEditing = { editingCard = null },
-                                    onLaunch = { item ->
-                                        when {
-                                            item is ActionItem && item.action == Action.APP_DRAWER -> showingDrawer = true
-                                            !launcher.launch(item) -> onClose()
-                                        }
-                                    },
-                                    store = store,
-                                    onAddItem = { addingToCard = card.id },
-                                    onRenameItem = { index -> renamingItem = card.id to index },
-                                    onClose = onClose,
-                                    cardOpacity = 1f - page.style.cardTransparency.coerceIn(TRANSPARENCY_RANGE) / 100f,
-                                )
+                                    }
+                                }
                             }
                             if (shownCards.isEmpty() && !editingPage) {
                                 item { EmptyPageHint() }
@@ -439,10 +461,30 @@ private fun EmptyPageHint() {
     )
 }
 
+/**
+ * Cards side by side, each [widths] of the row's [ROW_UNITS] wide with [gap] between them, so that cards of the same
+ * width line up from row to row. The cards are lined up at the top.
+ */
+@Composable
+private fun CardRow(widths: List<Int>, gap: Dp, modifier: Modifier, content: @Composable () -> Unit) {
+    Layout(content, modifier) { measurables, constraints ->
+        val gapPx = gap.roundToPx()
+        val unit = (constraints.maxWidth + gapPx) / ROW_UNITS.toFloat()
+        var left = 0f
+        val placed = measurables.mapIndexed { i, measurable ->
+            val width = (widths[i] * unit - gapPx).roundToInt().coerceAtLeast(0)
+            val placeable = measurable.measure(Constraints(width, width, 0, constraints.maxHeight))
+            (left.roundToInt() to placeable).also { left += widths[i] * unit }
+        }
+        layout(constraints.maxWidth, placed.maxOfOrNull { it.second.height } ?: 0) {
+            placed.forEach { (x, placeable) -> placeable.place(x, 0) }
+        }
+    }
+}
+
 @Composable
 private fun PanelCard(
     card: Card,
-    modifier: Modifier,
     dragHandle: Modifier,
     /** Whether this card is being edited. */
     editing: Boolean,
@@ -458,57 +500,106 @@ private fun PanelCard(
     onClose: () -> Unit,
     cardOpacity: Float,
 ) {
-    val padding = LocalAppearance.current.cardPaddingDp
+    // The card's own padding, names and switch colors, over the ones set for all cards.
+    val appearance = LocalAppearance.current.forCard(card.style)
+    val padding = appearance.cardPaddingDp
     // Outside edit mode a text card is only its text, straight on the page unless it asks for a card.
     if (card is TextCard && !editing && !pageEditing && !card.cardBackground) {
-        CardText(card, onStartEditing, modifier.padding(horizontal = padding.dp))
+        CardText(card, onStartEditing, Modifier.padding(horizontal = padding.dp))
         return
     }
-    val colors = MaterialTheme.colorScheme
-    Card(
-        modifier.fillMaxWidth(),
-        // The text color is given too: it cannot be worked out from a see-through card color.
-        colors = CardDefaults.cardColors(
-            containerColor = colors.surfaceContainerHighest.copy(alpha = cardOpacity),
-            contentColor = colors.onSurface,
-        ),
-        border = LocalThemeExtras.current.cardBorder,
-    ) {
-        Column(Modifier.padding(horizontal = padding.dp, vertical = (padding * 2 / 3).dp)) {
-            if (editing || pageEditing || card.showTitle) {
-                CardHeader(card, editing, pageEditing, dragHandle, onStartEditing, onDoneEditing, store)
-            }
-            when (card) {
-                is GridCard -> {
-                    if (editing) {
-                        ColumnsStepper(card.columns) { n -> store.update { it.setColumns(card.id, n) } }
-                        Hint(stringResource(R.string.edit_drag_hint))
+    val ownColor = card.style.color?.let(::cardColor)
+    CompositionLocalProvider(LocalAppearance provides appearance) {
+        CardTheme(ownColor) {
+            val colors = MaterialTheme.colorScheme
+            Card(
+                Modifier.fillMaxWidth(),
+                shape = card.style.cornerRadiusDp?.let { RoundedCornerShape(it.coerceIn(CARD_RADIUS_RANGE).dp) }
+                    ?: MaterialTheme.shapes.medium,
+                // The text color is given too: it cannot be worked out from a see-through card color.
+                colors = CardDefaults.cardColors(
+                    containerColor = (ownColor ?: colors.surfaceContainerHighest).copy(alpha = cardOpacity),
+                    contentColor = colors.onSurface,
+                ),
+                border = LocalThemeExtras.current.cardBorder,
+            ) {
+                Column(Modifier.padding(horizontal = padding.dp, vertical = (padding * 2 / 3).dp)) {
+                    if (editing || pageEditing || card.showTitle) {
+                        CardHeader(card, editing, pageEditing, dragHandle, onStartEditing, onDoneEditing, store)
                     }
-                    ItemGrid(
-                        items = card.items,
-                        columns = card.columns,
-                        editing = editing,
-                        switches = switches,
-                        onLaunch = onLaunch,
-                        onRemove = { index -> store.update { it.removeItem(card.id, index) } },
-                        onAdd = onAddItem,
-                        onMove = { from, to -> store.update { it.moveItem(card.id, from, to) } },
-                        onEdit = onRenameItem,
-                        showLabels = card.showLabels,
-                        rowGap = card.rowGapDp.dp,
-                        columnGap = card.columnGapDp?.dp,
-                    )
+                    Box(Modifier.fillMaxWidth()) {
+                        Column {
+                            CardBody(
+                                card, editing, switches, onStartEditing, onLaunch, store, onAddItem, onRenameItem,
+                                onClose,
+                            )
+                        }
+                        // While only the page is edited, a tap on a card's content edits the card.
+                        if (pageEditing && !editing) {
+                            Box(
+                                Modifier
+                                    .matchParentSize()
+                                    .clickable(
+                                        onClickLabel = stringResource(R.string.card_edit),
+                                        onClick = onStartEditing,
+                                    ),
+                            )
+                        }
+                    }
+                    if (editing) CardStyleControls(card, store)
                 }
-                is NoteCard -> NoteField(card, store)
-                is TextCard -> if (editing) TextCardEditor(card, store) else CardText(card, onStartEditing)
-                is HitokotoCard -> HitokotoContent(onStartEditing)
-                is SystemCard -> SystemCardContent(card.kind, onClose)
-                is UsageCard -> UsageCardContent(card, editing, store, onLaunch, onClose)
-                is ScreenTimeCard -> ScreenTimeContent(onLaunch, onClose)
-                is WidgetCard -> WidgetCardContent(card, editing, onClose)
             }
-            if (editing) CardStyleControls(card, store)
         }
+    }
+}
+
+/** The theme's light or dark colors, whichever read on a card's own [color]; the page's when it has none. */
+@Composable
+private fun CardTheme(color: Color?, content: @Composable () -> Unit) {
+    if (color == null) content() else PresetTheme(LocalThemeExtras.current.preset, color.luminance() < 0.5f, content)
+}
+
+/** What a card shows under its title. */
+@Composable
+private fun CardBody(
+    card: Card,
+    editing: Boolean,
+    switches: Set<Action>,
+    onStartEditing: () -> Unit,
+    onLaunch: (Item) -> Unit,
+    store: ConfigStore,
+    onAddItem: () -> Unit,
+    onRenameItem: (index: Int) -> Unit,
+    onClose: () -> Unit,
+) {
+    when (card) {
+        is GridCard -> {
+            if (editing) {
+                ColumnsStepper(card.columns) { n -> store.update { it.setColumns(card.id, n) } }
+                Hint(stringResource(R.string.edit_drag_hint))
+            }
+            ItemGrid(
+                items = card.items,
+                columns = card.columns,
+                editing = editing,
+                switches = switches,
+                onLaunch = onLaunch,
+                onRemove = { index -> store.update { it.removeItem(card.id, index) } },
+                onAdd = onAddItem,
+                onMove = { from, to -> store.update { it.moveItem(card.id, from, to) } },
+                onEdit = onRenameItem,
+                showLabels = card.showLabels,
+                rowGap = card.rowGapDp.dp,
+                columnGap = card.columnGapDp?.dp,
+            )
+        }
+        is NoteCard -> NoteField(card, store)
+        is TextCard -> if (editing) TextCardEditor(card, store) else CardText(card, onStartEditing)
+        is HitokotoCard -> HitokotoContent(onStartEditing)
+        is SystemCard -> SystemCardContent(card.kind, onClose)
+        is UsageCard -> UsageCardContent(card, editing, store, onLaunch, onClose)
+        is ScreenTimeCard -> ScreenTimeContent(onLaunch, onClose)
+        is WidgetCard -> WidgetCardContent(card, editing, onClose)
     }
 }
 
@@ -843,12 +934,15 @@ private fun ItemGrid(
 
 private const val DRAG_SCALE = 1.1f
 
-/** Icons fill their cells but for [columnGap]; without one they have a set size for the number of [columns]. */
+/**
+ * Icons fill their cells but for [columnGap]; without one they have a set size for the number of [columns], made
+ * smaller to fit a narrow card.
+ */
 private fun gridIconSize(cellWidth: Dp, columns: Int, columnGap: Dp?): Dp = when {
     columnGap != null -> (cellWidth - columnGap).coerceAtLeast(MIN_ICON_SIZE)
-    columns >= 6 -> 36.dp
-    columns == 5 -> 40.dp
-    else -> 44.dp
+    columns >= 6 -> 36.dp.coerceAtMost(cellWidth)
+    columns == 5 -> 40.dp.coerceAtMost(cellWidth)
+    else -> 44.dp.coerceAtMost(cellWidth)
 }
 
 private val MIN_ICON_SIZE = 16.dp

@@ -24,7 +24,7 @@
     <string name="page_config">配置管理</string>
     <string name="page_config_summary">多套配置切换，导出、导入</string>
     <string name="page_about">关于</string>
-    <string name="page_about_summary">版本、项目主页</string>
+    <string name="page_about_summary">版本、闪退记录、项目主页</string>
     <string name="setting_show_notification">显示常驻通知</string>
     <string name="show_notification_hint">关闭后通知栏不再显示 SlideX，但后台更容易被系统清理。</string>
 
@@ -75,6 +75,11 @@
     <string name="ball_square">方形</string>
     <string name="setting_ball_size">大小</string>
     <string name="setting_ball_opacity">不透明度</string>
+    <string name="setting_ball_idle">闲置时</string>
+    <string name="ball_idle_none">不变</string>
+    <string name="ball_idle_fade">变淡</string>
+    <string name="ball_idle_tuck">缩进边缘</string>
+    <string name="ball_idle_hint">3 秒没碰图标后变淡或缩进一半，一碰就恢复。选「缩进边缘」时，图标总是贴在离它较近的一侧。</string>
     <string name="setting_ball_tap">点击图标</string>
     <string name="ball_pull_hint">从图标往屏幕中间横着滑，面板会跟着手指拉出来。想把图标横着挪，先往上或往下拖一点再移。</string>
     <string name="setting_ball_haptics">点击和长按时振动</string>
@@ -173,6 +178,14 @@
     <string name="text_card_background">显示卡片底色</string>
     <string name="text_color">文字颜色</string>
     <string name="text_color_theme">跟随主题</string>
+    <string name="card_width">宽度</string>
+    <string name="card_width_full">整行</string>
+    <string name="card_width_half">半宽</string>
+    <string name="card_width_third">三分之一</string>
+    <string name="card_width_hint">半宽和三分之一的卡片会和后面的卡片并排，一行放不下就换到下一行。编辑时每张卡片都先占满一行。</string>
+    <string name="card_look">这张卡片的样式</string>
+    <string name="card_color">卡片颜色</string>
+    <string name="card_look_hint">选「默认」时和其他卡片一样，跟随「主题外观」里「卡片和图标」的设置。</string>
 
     <string name="panel_open_settings">设置</string>
     <string name="panel_empty_page">这一页还没有卡片。点右上角的编辑按钮或长按卡片标题，可以添加卡片。</string>
@@ -191,7 +204,7 @@
     <string name="new_grid_card_title">新卡片</string>
 
     <string name="card_drag">按住拖动排序</string>
-    <string name="page_edit_hint">点卡片右上角的调节按钮或长按卡片标题，可以单独编辑这张卡片；按住 ≡ 可拖动卡片。添加卡片、页面和页面外观在最下面。</string>
+    <string name="page_edit_hint">点一下卡片就能单独编辑它，宽度、圆角、颜色等都在里面；按住 ≡ 可拖动卡片。编辑时每张卡片都先占满一行。添加卡片、页面和页面外观在最下面。</string>
     <string name="card_edit">编辑这张卡片</string>
     <string name="edit_drag_hint">点图标可改名称，长按图标可拖动换位置；按住卡片右上角的 ≡ 可拖动卡片</string>
     <string name="card_rename">重命名</string>
@@ -338,6 +351,14 @@
     <string name="config_hint">把当前配置导出为 zip 文件，背景图片一起打包，换机或重装时再导入。导入的配置作为新的一套加入，不会覆盖现有的。设置项不在其中；换了手机后，小部件需要重新添加。</string>
     <string name="about_version">%1$s %2$s</string>
     <string name="about_project">项目主页</string>
+    <string name="about_build">构建 #%1$s · 提交 %2$s</string>
+    <string name="crash_log_title">闪退记录</string>
+    <string name="crash_log_none">没有闪退记录</string>
+    <string name="crash_log_summary">共 %1$d 次，最近一次在 %2$s</string>
+    <string name="crash_log_copy">复制记录</string>
+    <string name="crash_log_clear">清除记录</string>
+    <string name="crash_log_copied">已复制</string>
+    <string name="crash_log_hint">SlideX 闪退时会把出错的位置记在手机上，不会自动上传。遇到闪退，可以复制记录发给开发者。</string>
     <string name="about_credits">功能和交互参考已停更的「全局负一屏」，边缘触发参考 Smart Edge（MIT），图标来自 Material Symbols（Apache 2.0），系统开关借助 Shizuku（MIT）。</string>
     <string name="config_export">导出配置</string>
     <string name="config_import">导入配置</string>

@@ -231,6 +231,40 @@ class ConfigTest {
     }
 
     @Test
+    fun cardStylesRoundTripAndChangeOnlyTheirCard() {
+        val styled = config.setCardStyle("g") { it.copy(width = CardWidth.HALF, cornerRadiusDp = 4, color = "#E8F0FE") }
+        assertEquals(styled, parseConfig(styled.toJson()))
+        assertEquals(CardStyle(CardWidth.HALF, cornerRadiusDp = 4, color = "#E8F0FE"), styled.pages[0].cards[0].style)
+        assertEquals(CardStyle(), styled.pages[0].cards[1].style)
+        assertEquals(config, config.setCardStyle("missing") { it.copy(width = CardWidth.THIRD) })
+    }
+
+    @Test
+    fun cardsSavedBeforeStylesExistedTakeAWholeRow() {
+        val text = """{"pages":[{"cards":[{"type":"note","id":"n","title":"t"}]}]}"""
+        assertEquals(CardStyle(), parseConfig(text).pages[0].cards[0].style)
+    }
+
+    @Test
+    fun narrowCardsShareRowsInOrder() {
+        fun card(id: String, width: CardWidth) = NoteCard(id, id, style = CardStyle(width))
+        fun rows(vararg cards: Card) = cardRows(cards.toList()).map { row -> row.map { it.id } }
+        assertEquals(
+            listOf(listOf("a", "b"), listOf("c"), listOf("d"), listOf("e", "f"), listOf("g")),
+            rows(
+                card("a", CardWidth.HALF), card("b", CardWidth.HALF), card("c", CardWidth.THIRD),
+                card("d", CardWidth.FULL), card("e", CardWidth.THIRD), card("f", CardWidth.HALF),
+                card("g", CardWidth.THIRD),
+            ),
+        )
+        assertEquals(
+            listOf(listOf("x", "y", "z")),
+            rows(card("x", CardWidth.THIRD), card("y", CardWidth.THIRD), card("z", CardWidth.THIRD)),
+        )
+        assertEquals(emptyList<List<String>>(), rows())
+    }
+
+    @Test
     fun screenTimeCardsRoundTripRenameAndHideTheirTitle() {
         val withScreenTime = config.addCard(1, ScreenTimeCard("t", "今日使用"))
         assertEquals(withScreenTime, parseConfig(withScreenTime.toJson()))
